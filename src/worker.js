@@ -6,6 +6,7 @@ import {
   enrichSubstackAudio,
 } from './store.js';
 import { resolveSource } from './resolve.js';
+import { TtsError, ttsConfig, prepareAudio, makeAudioPart, readAudio, ttsUsage } from './tts.js';
 
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
@@ -69,6 +70,23 @@ async function api(request, env, ctx) {
       return (await setItemStatus(db, m[1], status)) ? json({ ok: true }) : fail(404, 'No such item');
     } catch (err) {
       if (err instanceof RangeError) return fail(400, err.message);
+      throw err;
+    }
+  }
+
+  // Read-aloud audio for text posts. The page asks for one piece at a time.
+  m = path.match(/^\/api\/items\/(\d+)\/audio(?:\/(\d+))?$/);
+  if (m) {
+    const cfg = ttsConfig(env);
+    try {
+      if (method === 'GET' && m[2] === undefined) {
+        const audio = await readAudio(db, m[1], cfg);
+        return new Response(audio, { headers: { 'content-type': 'audio/mpeg', 'content-length': String(audio.byteLength), 'cache-control': 'private, max-age=86400' } });
+      }
+      if (method === 'POST' && m[2] === undefined) return json({ ok: true, ...(await prepareAudio(db, m[1], cfg)), usage: await ttsUsage(db, cfg) });
+      if (method === 'POST') return json({ ok: true, ...(await makeAudioPart(db, m[1], m[2], cfg)) });
+    } catch (err) {
+      if (err instanceof TtsError) return fail(err.status, err.message);
       throw err;
     }
   }

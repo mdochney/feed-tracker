@@ -414,6 +414,52 @@ function play(item) {
   if (audio.src !== media) audio.src = media;
   audio.play().catch(() => {}); // the controls are there if autoplay is refused
 }
+
+// Read-aloud audio for a text post. The first press makes it, one piece per request, and
+// it is kept on the server; later presses only download it.
+const spoken = new Map(); // item id -> object URL, for this page visit
+async function listen(item, btn) {
+  if (btn.disabled) return;
+  const label = btn.textContent;
+  btn.disabled = true;
+  try {
+    if (!spoken.has(item.id)) {
+      if (item.tts_status !== 'ready') {
+        btn.textContent = 'Reading the post…';
+        const job = await api('/items/' + item.id + '/audio', { method: 'POST', body: {} });
+        if (!job.ready) {
+          for (let n = 0; n < job.parts; n++) {
+            btn.textContent = 'Making audio ' + (n + 1) + ' of ' + job.parts + '…';
+            await api('/items/' + item.id + '/audio/' + n, { method: 'POST', body: {} });
+          }
+          if (job.partial) showToast('Only the free preview of this post was available to read.');
+        }
+        item.tts_status = 'ready';
+      }
+      btn.textContent = 'Loading audio…';
+      const res = await fetch('/api/items/' + item.id + '/audio', { headers: { authorization: 'Bearer ' + token } });
+      if (!res.ok) {
+        let msg = 'The audio could not be loaded (' + res.status + ')';
+        try { msg = (await res.json()).error || msg; } catch {}
+        if (res.status === 404) item.tts_status = 'none';
+        throw new ApiError(res.status, msg);
+      }
+      spoken.set(item.id, URL.createObjectURL(await res.blob()));
+    }
+    const audio = $('audio');
+    $('player-title').textContent = item.source_name + ' · ' + item.title;
+    $('player').hidden = false;
+    document.body.classList.add('playing');
+    if (audio.src !== spoken.get(item.id)) audio.src = spoken.get(item.id);
+    audio.play().catch(() => {});
+    btn.textContent = 'Listen';
+  } catch (err) {
+    btn.textContent = label;
+    showToast(err.message || 'The audio could not be made.');
+  } finally {
+    btn.disabled = false;
+  }
+}
 $('player-close').addEventListener('click', () => {
   const audio = $('audio');
   audio.pause(); audio.removeAttribute('src'); audio.load();
@@ -577,6 +623,12 @@ function rowFor(item, index) {
   if (media) {
     const extra = el('div', 'extra');
     extra.append(button('Play audio', 'small', () => play(item)));
+    main.append(extra);
+  } else if (item.media_type === 'text' && href) {
+    const extra = el('div', 'extra');
+    const b = button(item.tts_status === 'ready' ? 'Listen' : 'Read aloud', 'small', () => listen(item, b));
+    b.title = item.tts_status === 'ready' ? 'Play the audio already made for this post' : 'Turn this post into audio (takes up to a minute)';
+    extra.append(b);
     main.append(extra);
   }
   body.append(main);

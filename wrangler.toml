@@ -11,6 +11,11 @@ database_name = "feed-tracker"
 database_id = "c7dc8537-7db3-4e67-b500-0b5cd79b0eb3"
 migrations_dir = "migrations"
 
+# Read-aloud audio for text posts (MP3 parts) and the text waiting to be read.
+[[kv_namespaces]]
+binding = "AUDIO"
+id = "2f5798a738c94a869b88de70e2df43f8"
+
 [triggers]
 # Every 10 minutes, polling the sources that have waited longest. On the free plan a run
 # reaches about 40 sources, so around 340 sources are each checked every hour and a half.
@@ -25,7 +30,10 @@ FETCH_BUDGET = "45"
 # Secrets (set with `npx wrangler secret put NAME`, never committed):
 #   APP_TOKEN      - the password the page asks for
 #   PRIVATE_FEEDS  - JSON map of source key to private feed URL, e.g. {"substack:samharris":"https://..."}
-#   YOUTUBE_API_KEY - YouTube Data API v3 key; without it YouTube falls back to the public feeds
+#   YOUTUBE_API_KEY - YouTube Data API v3 key; without it YouTube falls back to the public feeds.
+#                     Also used for Google Text-to-Speech unless GOOGLE_TTS_KEY is set.
+#   GOOGLE_TTS_KEY  - optional separate key for Cloud Text-to-Speech
+# Optional vars: TTS_VOICE (default en-US-Chirp3-HD-Charon), TTS_MONTHLY_CHARS (default 900000)
 
 [observability]
 enabled = true

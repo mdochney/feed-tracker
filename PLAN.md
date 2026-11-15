@@ -71,13 +71,16 @@ See `migrations/0001_init.sql`.
       shows (Sam Harris, Stay Tuned, The Long Game) return 404 there and still have none
 - [ ] Queue reordering, PWA manifest, YouTube embeds
 - [ ] Cross-posting dedupe via `shows`
-- [ ] Text-to-voice: article extraction, TTS on queue, R2 storage, Gmail as the text
-      source for paid posts
+- [x] Text-to-voice: "Read aloud" on text posts. Text comes from Substack's post JSON
+  (or the page's article element), is cut into pieces under Google's 5,000-byte limit,
+  synthesized with Google Cloud Text-to-Speech (Chirp 3 HD voice) and kept in the KV
+  namespace `AUDIO`. Made only on request; capped at 900,000 characters a month
+  (`TTS_MONTHLY_CHARS`), under Google's 1,000,000 free.
+- [ ] Gmail as the text source for paid posts (today only the free preview is read)
 - [ ] Optional: mirror queued videos to a YouTube playlist
 
 ## Open questions
 
-- Which TTS provider (cost and voice quality to be compared before building).
 - Whether paid Substack text should come from Gmail or a session cookie.
 - Deployment: connect this repo to Cloudflare for deploy-on-push, or `wrangler deploy`
   by hand.

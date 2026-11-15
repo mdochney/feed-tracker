@@ -90,3 +90,12 @@ For paid feeds when running the scripts locally, create `private-feeds.json`
   the source publishes audio or video.
 - `private_feed`: `yes` if a per-subscriber feed URL is needed, `check` if unsure.
 - `active`: `0` to skip the source.
+
+## Read aloud (text to voice)
+
+Text posts have a **Read aloud** button. It needs the Cloud Text-to-Speech API enabled in
+the Google Cloud project that owns `YOUTUBE_API_KEY` (billing must be on; the tracker stops
+at 900,000 characters a month, inside Google's free 1,000,000 for Chirp 3 HD voices). If
+that key is restricted to the YouTube API, add Text-to-Speech to its allowed APIs, or set a
+separate `GOOGLE_TTS_KEY` secret. Audio is stored in the `AUDIO` KV namespace and each
+post is generated once.

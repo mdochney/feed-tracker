@@ -437,3 +437,66 @@ test('polling an unchanged feed writes no item rows, and a private feed’s audi
   assert.deepEqual(await storePoll(db, row(), changed, '2026-11-14T16:00:00Z'), { inserted: 0, updated: 0 });
   assert.equal(db.sqlite.prepare("SELECT media_url FROM items WHERE guid = 'a'").get().media_url, 'https://cdn.example/full.mp3');
 });
+
+test('a text post is read aloud once, in pieces, and counted against the monthly allowance', async () => {
+  const { articleText, splitText } = await import('../src/tts.js');
+  const html = '<p>First &amp; <em>foremost</em>.<a class="footnote-anchor" href="#f1">1</a></p><figure><figcaption>A caption</figcaption></figure>' +
+    '<p class="button-wrapper"><a class="button primary" href="/subscribe">Subscribe now</a></p><h2>Next</h2><ul><li>One</li><li>Two&#8217;s</li></ul>';
+  assert.equal(articleText(html), 'First & foremost.\nNext\nOne\nTwo’s');
+  const long = Array.from({ length: 40 }, (_, i) => `Sentence number ${i} is here.`).join(' ');
+  const pieces = splitText(long + '\n' + 'é'.repeat(300), 400);
+  assert.ok(pieces.length > 3 && pieces.every((p) => new TextEncoder().encode(p).length <= 400));
+  assert.equal(pieces.join(' ').replace(/\s+/g, ''), (long + 'é'.repeat(300)).replace(/\s+/g, ''), 'no text is lost');
+
+  const db = await createDb();
+  await db.prepare("INSERT INTO sources (key, platform, name, feed_url) VALUES ('substack:x', 'substack', 'X', 'https://x.example/feed')").run();
+  await db.prepare("INSERT INTO items (source_id, guid, title, url, media_type) VALUES (1, 'g', 'A post', 'https://x.example/p/a-post', 'text')").run();
+  const store = new Map();
+  const kv = {
+    async get(k, type) { const v = store.get(k); return v == null ? null : type === 'json' ? JSON.parse(v) : v; },
+    async put(k, v) { store.set(k, v); },
+  };
+  const env = { DB: db, APP_TOKEN: 'secret', AUDIO: kv, YOUTUBE_API_KEY: 'k', TTS_MONTHLY_CHARS: '9000' };
+  const body = Array.from({ length: 12 }, (_, i) => `<p>${'Paragraph ' + i + ' of the post. '.repeat(30)}</p>`).join('');
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push(String(url));
+    if (String(url) === 'https://x.example/api/v1/posts/a-post') return Response.json({ audience: 'only_paid', body_html: body });
+    if (String(url).startsWith('https://texttospeech.googleapis.com/')) {
+      assert.equal(init.headers['x-goog-api-key'], 'k');
+      return Response.json({ audioContent: btoa('mp3:' + JSON.parse(init.body).input.text.length + ';') });
+    }
+    return new Response('no', { status: 404 });
+  };
+  const call = (method, p) => worker.fetch(new Request('https://app.example' + p, { method, headers: { authorization: 'Bearer secret' } }), env, {});
+  try {
+    assert.equal((await call('GET', '/api/items/1/audio')).status, 404, 'nothing made yet');
+    const job = await (await call('POST', '/api/items/1/audio')).json();
+    assert.equal(job.ready, false);
+    assert.equal(job.partial, true, 'a paid post read without a login is only the preview');
+    assert.ok(job.parts >= 2);
+    for (let n = 0; n < job.parts; n++) {
+      const r = await (await call('POST', `/api/items/1/audio/${n}`)).json();
+      assert.equal(r.ready, n === job.parts - 1);
+    }
+    const synthCalls = calls.filter((u) => u.includes('texttospeech')).length;
+    assert.equal(synthCalls, job.parts);
+    await call('POST', '/api/items/1/audio/0');
+    assert.equal(calls.filter((u) => u.includes('texttospeech')).length, synthCalls, 'a stored part is never paid for twice');
+    const used = (await db.prepare('SELECT chars FROM tts_usage').first()).chars;
+    assert.equal(used, job.chars - (job.parts - 1), 'every character sent is counted (joins between pieces are not sent)');
+
+    const audio = await call('GET', '/api/items/1/audio');
+    assert.equal(audio.headers.get('content-type'), 'audio/mpeg');
+    assert.match(await audio.text(), /^(mp3:\d+;)+$/);
+    assert.equal((await (await call('POST', '/api/items/1/audio')).json()).ready, true);
+    assert.equal((await (await call('GET', '/api/items?view=new')).json()).items[0].tts_status, 'ready');
+
+    await db.prepare("INSERT INTO items (source_id, guid, title, url, media_type) VALUES (1, 'h', 'Another', 'https://x.example/p/a-post', 'text')").run();
+    const over = await call('POST', '/api/items/2/audio');
+    assert.equal(over.status, 429, 'the monthly allowance stops new audio');
+    assert.equal((await call('POST', '/api/items/1/audio', )).status, 200);
+    assert.equal((await worker.fetch(new Request('https://app.example/api/items/1/audio'), env, {})).status, 401);
+  } finally { globalThis.fetch = realFetch; }
+});
