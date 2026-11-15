@@ -179,6 +179,9 @@ table.sources { width: 100%; border-collapse: collapse; font-size: 14px; }
 .sources .err { color: var(--warn); font-size: 12.5px; }
 .tablewrap { overflow-x: auto; }
 .btn.small { padding: 4px 9px; font-size: 12.5px; }
+.btn.quiet { border-color: transparent; background: none; color: var(--muted); font-weight: 500; padding: 6px 8px; }
+.btn.quiet:hover { color: var(--ink); border-color: var(--line); }
+.acts { flex-wrap: wrap; }
 .btn[disabled] { opacity: 0.55; cursor: default; }
 [hidden] { display: none !important; }
 @media (max-width: 620px) { .thumb { width: 84px; } }
@@ -255,7 +258,7 @@ body.playing .toast { bottom: 96px; }
     </section>
 
     <p class="keys" id="keys">
-      Keys: <kbd>j</kbd> <kbd>k</kbd> move · <kbd>q</kbd> add to watch next · <kbd>x</kbd> dismiss ·
+      Keys: <kbd>j</kbd> <kbd>k</kbd> move · <kbd>q</kbd> add to watch next · <kbd>x</kbd> dismiss · <kbd>p</kbd> pause source ·
       <kbd>d</kbd> mark done · <kbd>o</kbd> open · <kbd>u</kbd> undo
     </p>
   </div>
@@ -453,10 +456,41 @@ async function setStatus(item, status, { record = true } = {}) {
   }
 }
 
+const pauseLabel = (item) => (item.platform === 'youtube' ? 'Pause channel' : item.platform === 'podcast' ? 'Pause show' : 'Pause source');
+
+// Pause the source an item came from: its items leave New and it is no longer checked.
+// Nothing is deleted; Undo or the Sources tab brings it back.
+async function pauseSource(item) {
+  const id = item.source_id, name = item.source_name;
+  const removed = items.filter((i) => i.source_id === id).length;
+  items = items.filter((i) => i.source_id !== id);
+  total = Math.max(0, total - removed);
+  sel = Math.min(sel, Math.max(0, items.length - 1));
+  renderItems();
+  undo.push({ source: id, name });
+  showToast('Paused ' + name + '. Its items are hidden from New.', true);
+  try {
+    await api('/sources/' + id, { method: 'PATCH', body: { active: false } });
+    await loadState();
+    if (items.length < 10 && more) loadItems().catch(report);
+  } catch (err) {
+    report(err);
+    undo.pop();
+    refresh();
+  }
+}
+
 async function undoLast() {
   const last = undo.pop();
   hideToast();
   if (!last) return;
+  if (last.source) {
+    try {
+      await api('/sources/' + last.source, { method: 'PATCH', body: { active: true } });
+      await refresh();
+    } catch (err) { report(err); }
+    return;
+  }
   try {
     await api('/items/' + last.item.id, { method: 'POST', body: { status: last.prev } });
     await refresh();
@@ -533,6 +567,9 @@ function rowFor(item, index) {
   if (view === 'new') {
     acts.append(button('Watch next', 'primary', () => setStatus(item, 'queued')));
     acts.append(button('Dismiss', '', () => setStatus(item, 'dismissed')));
+    const pause = button(pauseLabel(item), 'quiet', () => pauseSource(item));
+    pause.title = 'Stop showing new items from ' + item.source_name;
+    acts.append(pause);
   } else if (view === 'queue') {
     acts.append(button('Done', 'primary', () => setStatus(item, 'done')));
     acts.append(button('Remove', '', () => setStatus(item, 'new')));
@@ -714,6 +751,7 @@ document.addEventListener('keydown', (e) => {
   else if (!item) { return; }
   else if (k === 'q' && view === 'new') setStatus(item, 'queued');
   else if (k === 'x' && view === 'new') setStatus(item, 'dismissed');
+  else if (k === 'p' && view === 'new') pauseSource(item);
   else if (k === 'd' && view === 'queue') setStatus(item, 'done');
   else if (k === 'o') { document.querySelector('.row.sel a.title')?.click(); }
   else return;
