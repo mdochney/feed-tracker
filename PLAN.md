@@ -7,8 +7,9 @@ triage each item: add to the watch-next queue, or dismiss.
 
 - **Everything is a feed.** Each source is polled as RSS/Atom. Platform APIs are used
   only (if at all) to seed the list of subscriptions.
-  - YouTube: per-channel Atom feed, long-form playlist variant (`UULF…`) to skip Shorts.
-    Seeded from the Google Takeout subscriptions CSV, so no OAuth in v1.
+  - YouTube: the Data API (`playlistItems.list` on each channel's long-form playlist,
+    `UULF…`, which skips Shorts and live streams), falling back to the public Atom feed
+    only when no API key is set. Seeded from the Google Takeout subscriptions CSV.
   - Substack: `https://<pub>.substack.com/feed`. Paid shows use a per-subscriber private
     feed URL.
   - Spotify shows: resolved once to their public RSS feed; no Spotify API at runtime.
@@ -52,7 +53,8 @@ See `migrations/0001_init.sql`.
 
 - [x] Substack seed list (`seeds/substack.csv`)
 - [x] Schema, feed parser, single-source poller, coverage script, tests
-- [ ] YouTube seed (needs Takeout `subscriptions.csv`)
+- [x] YouTube: 274 channels seeded; polled through the Data API (the public feeds were
+      down for over a week in November 2026). Needs the `YOUTUBE_API_KEY` secret.
 - [ ] Podcast seed (needs the list of Spotify shows; resolve each to RSS)
 - [ ] Private feed URLs for paid Substack shows
 - [x] Worker: cron poller writing to D1, first-run backfill rule (items older than a

@@ -66,7 +66,7 @@ test('resolveSource: Substack home page, YouTube channel, plain feed', async () 
   const fetchImpl = async (url) => {
     if (url === 'https://example.substack.com/') return new Response('<html><head><link rel="alternate" type="application/rss+xml" href="/feed"></head></html>');
     if (url === 'https://example.substack.com/feed') return new Response(rss);
-    if (url === 'https://www.youtube.com/@example') return new Response(`<link rel="canonical" href="https://www.youtube.com/channel/${id}">`);
+    if (url === 'https://www.youtube.com/@example') return new Response(`<link rel="canonical" href="https://www.youtube.com/channel/${id}"><meta property="og:title" content="Example &amp; Co">`);
     if (url.startsWith('https://www.youtube.com/feeds/videos.xml')) return new Response(atom);
     return new Response('nope', { status: 404 });
   };
@@ -76,7 +76,7 @@ test('resolveSource: Substack home page, YouTube channel, plain feed', async () 
   });
   const yt = await resolveSource('https://www.youtube.com/@example', { fetchImpl });
   assert.equal(yt.key, 'youtube:' + id);
-  assert.equal(yt.name, 'Example Channel');
+  assert.equal(yt.name, 'Example & Co');
   assert.match(yt.feed_url, /playlist_id=UULFa{22}$/);
   await assert.rejects(resolveSource('https://nothing.example', { fetchImpl }), /HTTP 404/);
 });
@@ -186,4 +186,68 @@ test('Substack episodes pick up duration and art from the show\u2019s podcast fe
   const before = calls.length;
   assert.equal(await enrichSubstackAudio(db, row(), { fetchImpl }), 0);
   assert.equal(calls.length, before);
+});
+
+test('YouTube via the Data API: items, empty playlists, 304s, quota errors, durations', async () => {
+  const { pollYoutube, parseIsoDuration, playlistIdOf } = await import('../src/youtube.js');
+  const { fillYoutubeDurations } = await import('../src/store.js');
+  const id = 'UC' + 'b'.repeat(22);
+  const db = await createDb();
+  const { source } = await addSource(db, { key: 'youtube:' + id, platform: 'youtube', name: 'Chan', feed_url: `https://www.youtube.com/feeds/videos.xml?playlist_id=UULF${'b'.repeat(22)}` });
+  assert.equal(playlistIdOf(source), 'UULF' + 'b'.repeat(22));
+  assert.equal(playlistIdOf({ key: 'youtube:' + id, feed_url: `https://www.youtube.com/feeds/videos.xml?channel_id=${id}` }), 'UU' + 'b'.repeat(22));
+  assert.equal(parseIsoDuration('PT1H2M5S'), 3725);
+  assert.equal(parseIsoDuration('PT45S'), 45);
+  assert.equal(parseIsoDuration('P0D'), null);
+
+  let mode = 'ok';
+  const seen = [];
+  const fetchImpl = async (url, init) => {
+    const u = new URL(url);
+    seen.push({ path: u.pathname, params: Object.fromEntries(u.searchParams), headers: init.headers });
+    if (u.pathname.endsWith('/videos')) {
+      return Response.json({ items: [{ id: 'vid1', contentDetails: { duration: 'PT12M30S' } }, { id: 'live1', contentDetails: { duration: 'P0D' } }] });
+    }
+    if (mode === 'missing') return Response.json({ error: { errors: [{ reason: 'playlistNotFound' }] } }, { status: 404 });
+    if (mode === 'quota') return Response.json({ error: { errors: [{ reason: 'quotaExceeded' }] } }, { status: 403 });
+    if (init.headers['if-none-match'] === '"e1"') return new Response(null, { status: 304 });
+    return Response.json({
+      etag: '"e1"',
+      items: [
+        { snippet: { title: 'First video', description: 'About  things', publishedAt: '2026-11-14T10:00:00Z', thumbnails: { medium: { url: 'https://i.ytimg.com/vi/vid1/mqdefault.jpg' } }, resourceId: { videoId: 'vid1' } }, contentDetails: { videoId: 'vid1', videoPublishedAt: '2026-11-14T09:00:00Z' } },
+        { snippet: { title: 'Live now', publishedAt: '2026-11-14T11:00:00Z', resourceId: { videoId: 'live1' } }, contentDetails: { videoId: 'live1' } },
+        { snippet: { title: 'Private video', resourceId: { videoId: 'gone' } }, contentDetails: { videoId: 'gone' } },
+      ],
+    });
+  };
+
+  const opts = { fetchImpl, youtubeApiKey: 'k' };
+  const [first] = await pollBatch(db, opts);
+  assert.deepEqual([first.ok, first.inserted], [true, 2]);
+  assert.equal(seen[0].params.playlistId, 'UULF' + 'b'.repeat(22));
+  assert.equal(seen[0].params.key, 'k');
+  const rows = Object.fromEntries(db.sqlite.prepare('SELECT guid, title, url, media_type, duration_sec, thumbnail_url, published_at, summary FROM items').all().map((r) => [r.guid, r]));
+  assert.equal(rows['yt:video:vid1'].url, 'https://www.youtube.com/watch?v=vid1');
+  assert.equal(rows['yt:video:vid1'].media_type, 'video');
+  assert.equal(rows['yt:video:vid1'].published_at, '2026-11-14T09:00:00.000Z');
+  assert.equal(rows['yt:video:vid1'].summary, 'About things');
+  assert.equal(rows['yt:video:vid1'].duration_sec, 750, 'duration filled in by the same run');
+  assert.equal(rows['yt:video:live1'].duration_sec, 0, 'no duration yet: recorded so it is not asked for again');
+  assert.equal(await fillYoutubeDurations(db, opts), 0);
+
+  // Unchanged playlist: conditional request, nothing new.
+  const [second] = await pollBatch(db, opts);
+  assert.equal(second.inserted, 0);
+  assert.equal(db.sqlite.prepare('SELECT last_status FROM sources').get().last_status, 'not_modified');
+
+  db.sqlite.prepare('UPDATE sources SET etag = NULL').run();
+  mode = 'missing';
+  const empty = await pollYoutube(db.sqlite.prepare('SELECT * FROM sources').get(), { apiKey: 'k', fetchImpl });
+  assert.deepEqual([empty.status, empty.items.length], ['ok', 0]);
+
+  mode = 'quota';
+  const [third] = await pollBatch(db, opts);
+  assert.equal(third.ok, false);
+  assert.match(third.error, /daily quota/);
+  assert.ok(!/key=/.test(db.sqlite.prepare('SELECT last_status FROM sources').get().last_status), 'the key never lands in stored errors');
 });

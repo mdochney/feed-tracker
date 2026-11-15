@@ -10,6 +10,8 @@ const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const fail = (status, error) => json({ error }, status);
 
+const pollOpts = (env) => ({ privateFeeds: privateFeeds(env), youtubeApiKey: env.YOUTUBE_API_KEY || null });
+
 function privateFeeds(env) {
   if (!env.PRIVATE_FEEDS) return {};
   try { return JSON.parse(env.PRIVATE_FEEDS); } catch { console.error('PRIVATE_FEEDS is not valid JSON'); return {}; }
@@ -70,7 +72,7 @@ async function api(request, env, ctx) {
     let resolved;
     try { resolved = await resolveSource(input); } catch (err) { return fail(400, String(err.message ?? err)); }
     const { source, created } = await addSource(db, resolved);
-    const polled = await pollAndStore(db, source, { privateFeeds: privateFeeds(env) });
+    const polled = await pollAndStore(db, source, pollOpts(env));
     return json({ ok: true, created, source: { id: source.id, name: source.name, platform: source.platform }, polled });
   }
 
@@ -84,7 +86,7 @@ async function api(request, env, ctx) {
 
   if (path === '/api/poll' && method === 'POST') {
     const { source_id: sourceId } = await body(request);
-    const results = await pollBatch(db, { limit: batch, sourceId: sourceId ?? null, privateFeeds: privateFeeds(env) });
+    const results = await pollBatch(db, { limit: batch, sourceId: sourceId ?? null, ...pollOpts(env) });
     return json({ ok: true, polled: results.length, inserted: results.reduce((n, r) => n + (r.inserted ?? 0), 0), failed: results.filter((r) => !r.ok) });
   }
 
@@ -106,7 +108,7 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    const results = await pollBatch(env.DB, { limit: Number(env.POLL_BATCH) || 20, privateFeeds: privateFeeds(env) });
+    const results = await pollBatch(env.DB, { limit: Number(env.POLL_BATCH) || 20, ...pollOpts(env) });
     const failed = results.filter((r) => !r.ok);
     console.log(`polled ${results.length} sources, ${results.reduce((n, r) => n + (r.inserted ?? 0), 0)} new items, ${failed.length} failed`);
     for (const f of failed) console.warn(`${f.key}: ${f.error}`);

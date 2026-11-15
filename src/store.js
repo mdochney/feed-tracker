@@ -2,6 +2,7 @@
 // so it runs in the Worker and, through a small shim, in Node tests.
 
 import { pollSource } from './poll.js';
+import { fetchDurations } from './youtube.js';
 
 export const BACKFILL_DAYS = 7;   // on a source's first poll, older items start out dismissed
 const MAX_ITEMS_PER_POLL = 50;    // podcast feeds can carry a show's whole history
@@ -123,7 +124,7 @@ export async function pollAndStore(db, source, opts = {}) {
     const result = await pollSource(source, opts);
     const { inserted } = await storePoll(db, source, result);
     // Only when the feed changed, and within a per-run budget: each lookup costs extra requests.
-    if (result.status === 'ok' && (opts.enrichBudget?.left ?? 1) > 0) {
+    if (result.status === 'ok' && source.platform === 'substack' && (opts.enrichBudget?.left ?? 1) > 0) {
       try {
         if (opts.enrichBudget) opts.enrichBudget.left--;
         await enrichSubstackAudio(db, source, opts);
@@ -151,7 +152,23 @@ export async function pollBatch(db, { limit = 20, concurrency = 6, sourceId = nu
   await Promise.all(Array.from({ length: Math.min(concurrency, sources.length) }, async () => {
     while (next < sources.length) out.push(await pollAndStore(db, sources[next++], opts));
   }));
+  if (opts.youtubeApiKey) {
+    try { await fillYoutubeDurations(db, opts); } catch (err) { console.warn(`YouTube durations unavailable (${err?.message ?? err})`); }
+  }
   return out;
+}
+
+// One API call per run fills in durations for the newest YouTube videos that lack one.
+// 0 is stored when the API has no duration (live or upcoming), so those are not asked for again.
+export async function fillYoutubeDurations(db, { youtubeApiKey, fetchImpl = fetch } = {}) {
+  const { results } = await db.prepare(
+    `SELECT id, guid FROM items WHERE guid LIKE 'yt:video:%' AND duration_sec IS NULL
+     ORDER BY published_at DESC LIMIT 50`).all();
+  if (!results.length) return 0;
+  const ids = results.map((r) => r.guid.slice('yt:video:'.length));
+  const durations = await fetchDurations(ids, { apiKey: youtubeApiKey, fetchImpl });
+  await db.batch(results.map((r, i) => db.prepare('UPDATE items SET duration_sec = ? WHERE id = ?').bind(durations.get(ids[i]) ?? 0, r.id)));
+  return results.length;
 }
 
 // ---- reads for the API -------------------------------------------------------

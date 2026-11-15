@@ -2,13 +2,16 @@
 // (D1 upserts) and the coverage script (report) both build on this.
 
 import { parseFeed } from './feeds.js';
+import { pollYoutube } from './youtube.js';
 
 const USER_AGENT = 'feed-tracker/0.1 (personal feed reader)';
 
 // source: { key, feed_url, etag?, last_modified? }
 // privateFeeds: { [source.key]: url } — overrides for paid feeds, never stored in the repo.
 // Returns { status: 'ok' | 'not_modified', items, etag, last_modified, title, site_url }.
-export async function pollSource(source, { fetchImpl = fetch, privateFeeds = {}, timeoutMs = 15000 } = {}) {
+export async function pollSource(source, { fetchImpl = fetch, privateFeeds = {}, timeoutMs = 15000, youtubeApiKey = null } = {}) {
+  // YouTube goes through the Data API when a key is configured; its public feeds are unreliable.
+  if (source.platform === 'youtube' && youtubeApiKey) return pollYoutube(source, { apiKey: youtubeApiKey, fetchImpl });
   const url = privateFeeds[source.key] ?? source.feed_url;
   const headers = { 'user-agent': USER_AGENT, accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml' };
   if (source.etag) headers['if-none-match'] = source.etag;

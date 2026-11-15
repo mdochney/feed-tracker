@@ -12,15 +12,17 @@ database_id = "c7dc8537-7db3-4e67-b500-0b5cd79b0eb3"
 migrations_dir = "migrations"
 
 [triggers]
-# Every 10 minutes, polling the POLL_BATCH sources that have waited longest.
+# Every 10 minutes, polling the POLL_BATCH sources that have waited longest
+# (60 x 6 runs an hour covers about 360 sources hourly).
 crons = ["*/10 * * * *"]
 
 [vars]
-POLL_BATCH = "20"
+POLL_BATCH = "60"
 
 # Secrets (set with `npx wrangler secret put NAME`, never committed):
 #   APP_TOKEN      - the password the page asks for
 #   PRIVATE_FEEDS  - JSON map of source key to private feed URL, e.g. {"substack:samharris":"https://..."}
+#   YOUTUBE_API_KEY - YouTube Data API v3 key; without it YouTube falls back to the public feeds
 
 [observability]
 enabled = true

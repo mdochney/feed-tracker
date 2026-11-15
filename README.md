@@ -30,7 +30,7 @@ npm run dev                # http://localhost:8787, sign in with the token above
 ```
 
 Open Sources and press "Check for new items now" a few times to load the feeds
-(each press checks the 20 sources that have waited longest).
+(each press checks the 60 sources that have waited longest).
 
 ## Deploy to Cloudflare
 
@@ -44,12 +44,17 @@ npx wrangler d1 create feed-tracker      # copy the database_id into wrangler.to
 npm run migrate                          # schema + seeded subscriptions
 npx wrangler secret put APP_TOKEN        # a long random string; the page asks for it once per browser
 npx wrangler secret put PRIVATE_FEEDS    # optional: {"substack:samharris":"https://..."}
+npx wrangler secret put YOUTUBE_API_KEY  # YouTube Data API v3 key (Google Cloud console)
 npm run deploy
 ```
 
-The cron trigger then checks 20 sources every 10 minutes, so every source is
-checked at least hourly up to about 120 sources. Raise `POLL_BATCH` in
+The cron trigger then checks 60 sources every 10 minutes, so every source is
+checked at least hourly up to about 360 sources. Raise `POLL_BATCH` in
 `wrangler.toml` as the list grows.
+
+YouTube uses about one API quota unit per channel per check, so 274 channels checked
+hourly is roughly 6,600 of the 10,000 free units a day. Without `YOUTUBE_API_KEY` the
+Worker falls back to YouTube's public feeds, which have long outages.
 
 ## Other commands
 

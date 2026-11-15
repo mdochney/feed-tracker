@@ -37,17 +37,20 @@ export async function resolveSource(input, { fetchImpl = fetch, longFormOnly = t
   // YouTube: channel pages, @handles, or an existing feed URL.
   if (/(^|\.)youtube\.com$/.test(url.hostname)) {
     let channelId = url.pathname.match(/\/channel\/(UC[\w-]{22})/)?.[1] ?? url.searchParams.get('channel_id');
+    let html = null;
     if (!channelId) {
-      const html = await get(url.href, fetchImpl);
+      html = await get(url.href, fetchImpl);
       channelId =
         html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/channel\/(UC[\w-]{22})"/)?.[1] ??
         html.match(/"(?:channelId|externalId)":"(UC[\w-]{22})"/)?.[1];
     }
     if (!channelId) throw new Error('Could not find a channel on that YouTube page');
-    const feedUrl = youtubeFeedUrl(channelId, { longFormOnly });
-    const feed = tryFeed(await get(youtubeFeedUrl(channelId, { longFormOnly: false }), fetchImpl));
-    if (!feed) throw new Error('That channel has no readable feed');
-    return { key: `youtube:${channelId}`, platform: 'youtube', name: feed.title || channelId, feed_url: feedUrl, site_url: `https://www.youtube.com/channel/${channelId}` };
+    // The name comes from the channel page, not the feed: the feed endpoint has long outages.
+    const page = html ?? await get(`https://www.youtube.com/channel/${channelId}`, fetchImpl);
+    const title = page.match(/<meta property="og:title" content="([^"]+)"/)?.[1] ?? page.match(/<title>([^<]+?)(?: - YouTube)?<\/title>/)?.[1];
+    if (!title) throw new Error('That does not look like a YouTube channel');
+    const name = title.replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim();
+    return { key: `youtube:${channelId}`, platform: 'youtube', name, feed_url: youtubeFeedUrl(channelId, { longFormOnly }), site_url: `https://www.youtube.com/channel/${channelId}` };
   }
 
   // Anything else: is it already a feed?
