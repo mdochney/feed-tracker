@@ -540,6 +540,12 @@ test('a text post is read aloud once, in pieces, and counted against the monthly
     assert.equal((await (await call('GET', '/api/state')).json()).substack_session.ok, false);
     job = await (await call('POST', '/api/items/2/audio', { allow_partial: true })).json();
     assert.deepEqual([job.partial, job.parts], [true, 1]);
+    // Remaking an item never reuses audio from the earlier run.
+    await db.prepare("UPDATE items SET tts_status = 'none', tts_key = NULL WHERE id = 1").run();
+    const before = synth();
+    job = await (await call('POST', '/api/items/1/audio', { allow_partial: true })).json();
+    await call('POST', '/api/items/1/audio/0');
+    assert.equal(synth(), before + 1);
     assert.equal((await call('DELETE', '/api/substack-session')).status, 200);
     assert.equal(store.has('substack:sid'), false);
   } finally { globalThis.fetch = realFetch; }

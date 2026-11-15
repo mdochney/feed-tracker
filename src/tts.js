@@ -203,7 +203,9 @@ export async function synthesize(text, { apiKey, voice = DEFAULT_VOICE, fetchImp
 
 const month = (at = new Date()) => at.toISOString().slice(0, 7);
 const textKey = (id) => `text:${id}`;
-const partKey = (id, n) => `audio:${id}:${n}`;
+// Parts are keyed by the run that made them, so audio from an earlier run is never mixed in.
+const partKey = (id, run, n) => `audio:${id}:${run}:${n}`;
+const parseKey = (k) => { const [run, parts] = String(k ?? '').split(':'); return { run, parts: Number(parts) }; };
 
 export function ttsConfig(env) {
   return {
@@ -228,10 +230,10 @@ export async function prepareAudio(db, id, cfg, { fetchImpl = fetch, allowPartia
   requireSetup(cfg);
   const item = await db.prepare('SELECT id, title, url, media_type, tts_status, tts_key FROM items WHERE id = ?').bind(Number(id)).first();
   if (!item) throw new TtsError(404, 'No such item');
-  if (item.tts_status === 'ready') return { ready: true, parts: Number(item.tts_key) };
+  if (item.tts_status === 'ready') return { ready: true, parts: parseKey(item.tts_key).parts };
   // Text saved by an unfinished run is reused, so its stored parts still line up.
   const saved = item.tts_status === 'pending' ? await cfg.kv.get(textKey(item.id), 'json') : null;
-  if (saved?.pieces?.length) return { ready: false, parts: saved.pieces.length, chars: saved.chars, partial: !!saved.partial };
+  if (saved?.run && saved.pieces?.length) return { ready: false, parts: saved.pieces.length, chars: saved.chars, partial: !!saved.partial };
 
   const { text, partial, signedIn } = await fetchArticle(item, { fetchImpl, kv: cfg.kv });
   if (text.length < 200 && !partial) throw new TtsError(422, 'No readable text was found for this post');
@@ -244,8 +246,9 @@ export async function prepareAudio(db, id, cfg, { fetchImpl = fetch, allowPartia
     throw new TtsError(429, `This post (${full.length.toLocaleString('en-US')} characters) would go over this month's voice allowance: ${used.toLocaleString('en-US')} of ${cfg.monthlyChars.toLocaleString('en-US')} used`);
   }
   const pieces = splitText(full);
-  await cfg.kv.put(textKey(item.id), JSON.stringify({ pieces, chars: full.length, partial }));
-  await db.prepare("UPDATE items SET tts_status = 'pending', tts_key = ? WHERE id = ?").bind(String(pieces.length), item.id).run();
+  const run = crypto.randomUUID().slice(0, 8);
+  await cfg.kv.put(textKey(item.id), JSON.stringify({ run, pieces, chars: full.length, partial }));
+  await db.prepare("UPDATE items SET tts_status = 'pending', tts_key = ? WHERE id = ?").bind(`${run}:${pieces.length}`, item.id).run();
   return { ready: false, parts: pieces.length, chars: full.length, partial };
 }
 
@@ -255,9 +258,9 @@ export async function makeAudioPart(db, id, n, cfg, { fetchImpl = fetch } = {}) 
   requireSetup(cfg);
   const itemId = Number(id), part = Number(n);
   const saved = await cfg.kv.get(textKey(itemId), 'json');
-  if (!saved?.pieces?.[part]) throw new TtsError(404, 'Nothing to read for that part; start again');
+  if (!saved?.run || !saved.pieces?.[part]) throw new TtsError(404, 'Nothing to read for that part; start again');
   const total = saved.pieces.length;
-  if (!(await cfg.kv.get(partKey(itemId, part), 'stream'))) {
+  if (!(await cfg.kv.get(partKey(itemId, saved.run, part), 'stream'))) {
     const text = saved.pieces[part];
     const used = await usedThisMonth(db);
     if (used + text.length > cfg.monthlyChars) throw new TtsError(429, "This month's voice allowance is used up");
@@ -270,11 +273,11 @@ export async function makeAudioPart(db, id, n, cfg, { fetchImpl = fetch } = {}) 
       if (err instanceof TtsError) await db.prepare('UPDATE tts_usage SET chars = MAX(0, chars - ?) WHERE month = ?').bind(text.length, month()).run();
       throw err;
     }
-    await cfg.kv.put(partKey(itemId, part), audio);
+    await cfg.kv.put(partKey(itemId, saved.run, part), audio);
   }
   const ready = part === total - 1;
   if (ready) {
-    await db.prepare("UPDATE items SET tts_status = 'ready', tts_key = ? WHERE id = ?").bind(String(total), itemId).run();
+    await db.prepare("UPDATE items SET tts_status = 'ready', tts_key = ? WHERE id = ?").bind(`${saved.run}:${total}`, itemId).run();
   }
   return { ready, part, parts: total };
 }
@@ -284,8 +287,9 @@ export async function readAudio(db, id, cfg) {
   if (!cfg.kv) throw new TtsError(503, 'Audio storage is not set up on this Worker');
   const item = await db.prepare('SELECT tts_status, tts_key FROM items WHERE id = ?').bind(Number(id)).first();
   if (!item || item.tts_status !== 'ready') throw new TtsError(404, 'No audio has been made for this item');
-  const parts = await Promise.all(Array.from({ length: Number(item.tts_key) }, (_, n) => cfg.kv.get(partKey(Number(id), n), 'arrayBuffer')));
-  if (parts.some((p) => !p)) {
+  const key = parseKey(item.tts_key);
+  const parts = await Promise.all(Array.from({ length: key.parts || 0 }, (_, n) => cfg.kv.get(partKey(Number(id), key.run, n), 'arrayBuffer')));
+  if (!parts.length || parts.some((p) => !p)) {
     await db.prepare("UPDATE items SET tts_status = 'none', tts_key = NULL WHERE id = ?").bind(Number(id)).run();
     throw new TtsError(404, 'The stored audio is incomplete; make it again');
   }
