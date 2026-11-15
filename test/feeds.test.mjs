@@ -110,3 +110,15 @@ test('parseCsv handles quotes and the seed files load', async () => {
     assert.ok(!/api\.substack\.com/.test(s.feed_url), 'no private feed URLs in the repo');
   }
 });
+
+test('trimFeed keeps only the newest items of a very long feed', async () => {
+  const { trimFeed } = await import('../src/poll.js');
+  const item = (n) => `<item><title>Episode ${n}</title><guid>g${n}</guid><link>https://x.example/${n}</link><description>${'x'.repeat(900)}</description><enclosure url="https://x.example/${n}.mp3" type="audio/mpeg"/></item>`;
+  const long = `<?xml version="1.0"?><rss version="2.0"><channel><title>Long Show</title>${Array.from({ length: 400 }, (_, i) => item(400 - i)).join('')}</channel></rss>`;
+  const feed = parseFeed(trimFeed(long));
+  assert.equal(feed.title, 'Long Show');
+  assert.equal(feed.items.length, 40);
+  assert.equal(feed.items[0].title, 'Episode 400');
+  const short = '<rss><channel><title>S</title><item><title>a</title><guid>1</guid></item></channel></rss>';
+  assert.equal(trimFeed(short), short, 'short feeds are left alone');
+});

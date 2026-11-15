@@ -4,6 +4,23 @@
 import { parseFeed } from './feeds.js';
 import { pollYoutube } from './youtube.js';
 
+// Podcast feeds can carry a show's whole history (thousands of episodes, several MB).
+// Only the newest entries matter here, and parsing the rest costs CPU the free plan does
+// not have, so long feeds are cut after their first `keep` items. Feeds list newest first.
+export function trimFeed(xml, keep = 40) {
+  if (xml.length < 200_000) return xml;
+  for (const [close, tail] of [['</item>', '</channel></rss>'], ['</entry>', '</feed>']]) {
+    let at = -1;
+    for (let i = 0; i < keep; i++) {
+      const next = xml.indexOf(close, at + 1);
+      if (next === -1) { at = -1; break; }
+      at = next;
+    }
+    if (at !== -1) return xml.slice(0, at + close.length) + tail;
+  }
+  return xml;
+}
+
 const USER_AGENT = 'feed-tracker/0.1 (personal feed reader)';
 
 // source: { key, feed_url, etag?, last_modified? }
@@ -33,7 +50,7 @@ export async function pollSource(source, { fetchImpl = fetch, privateFeeds = {},
   }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-  const feed = parseFeed(await res.text());
+  const feed = parseFeed(trimFeed(await res.text()));
   return {
     status: 'ok',
     items: feed.items,

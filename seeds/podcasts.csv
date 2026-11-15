@@ -1,1 +1,58 @@
 key,platform,name,feed_url,av_tier,private_feed,active,notes
+podcast:a-special-place-in-hell,podcast,A Special Place in Hell,https://api.substack.com/feed/podcast/944235.rss,regular,no,0,Paused: no episode since 2024-11
+podcast:aea-research-highlights,podcast,AEA Research Highlights,https://rss.libsyn.com/shows/250034/destinations/1883396.xml,regular,no,1,
+podcast:all-in-with-chamath-jason-sacks-friedberg,podcast,"All-In with Chamath, Jason, Sacks & Friedberg",https://rss.libsyn.com/shows/254861/destinations/1928300.xml,regular,no,1,
+podcast:andrew-yang-podcast,podcast,Andrew Yang Podcast,https://rss.amperwave.net/v2/feed/audacynetwork/yang-speaks,regular,no,1,
+podcast:astral-codex-ten-podcast,podcast,Astral Codex Ten Podcast,https://rss.libsyn.com/shows/108018/destinations/586545.xml,regular,no,1,
+podcast:bad-takes,podcast,Bad Takes,https://anchor.fm/s/45d8b234/podcast/rss,regular,no,0,Paused: no episode since 2023-08
+podcast:ceteris-never-paribus-the-history-of-economic-thought,podcast,Ceteris Never Paribus: The History of Economic Thought,https://ceterisneverparibus.net/feed/podcast/,regular,no,1,
+podcast:childish,podcast,Childish,https://rss.libsyn.com/shows/136370/destinations/844412.xml,regular,no,1,
+podcast:city-cast-philly,podcast,City Cast Philly,https://feeds.megaphone.fm/citycastphilly,regular,no,1,
+podcast:comedy-bang-bang-the-podcast,podcast,Comedy Bang Bang: The Podcast,https://feeds.simplecast.com/byb4nhvN,regular,no,1,
+podcast:conan-o-brien-needs-a-friend,podcast,Conan O'Brien Needs A Friend,https://feeds.simplecast.com/dHoohVNH,regular,no,1,
+podcast:conversations-with-tyler,podcast,Conversations with Tyler,https://rss.libsyn.com/shows/137081/destinations/850607.xml,regular,no,1,
+podcast:cspi-podcast,podcast,CSPI Podcast,https://api.substack.com/feed/podcast/226664.rss,regular,no,1,
+podcast:dialogues-with-richard-reeves,podcast,Dialogues with Richard Reeves,https://feed.podbean.com/richardvreeves/feed.xml,regular,no,0,Paused: no episode since 2022-05
+podcast:doug-loves-movies,podcast,Doug Loves Movies,http://feeds.feedburner.com/DougLovesMovies,regular,no,1,
+podcast:doug-polk-podcast,podcast,Doug Polk Podcast,https://rss.buzzsprout.com/1813818.rss,regular,no,1,
+podcast:from-the-new-world,podcast,From the New World,https://api.substack.com/feed/podcast/245110.rss,regular,no,0,Paused: no episode since 2025-06
+podcast:high-hopes-a-phillies-podcast,podcast,High Hopes: A Phillies Podcast,https://rss.amperwave.net/v2/feed/audacynetwork/7f378d2e169f0c53260708f89efe33f6,regular,no,1,
+podcast:history-102-with-whatifalthist-s-rudyard-lynch,podcast,History 102 with WhatifAltHist's Rudyard Lynch,https://feeds.megaphone.fm/history102,regular,no,1,
+podcast:honestly-with-bari-weiss,podcast,Honestly with Bari Weiss,https://feeds.megaphone.fm/RSV2347142881,regular,no,1,
+podcast:human-potential-lab,podcast,Human Potential Lab,https://rss.art19.com/the-psychology-podcast,regular,no,1,
+podcast:ideas-having-sex,podcast,Ideas Having Sex,https://ideashavingsex.squarespace.com/?format=rss,regular,no,0,Paused: no episode since 2025-04
+podcast:kyla-s-newsletter-audio-version,podcast,Kyla's Newsletter: Audio Version,https://feeds.transistor.fm/lets-appreciate,regular,no,1,
+podcast:let-s-go-to-the-phones-the-only-philly-sports-podcast,podcast,Let's Go To The Phones: The Only Philly Sports Podcast,https://rss.buzzsprout.com/1242428.rss,regular,no,1,
+podcast:macro-musings-with-david-beckworth,podcast,Macro Musings with David Beckworth,https://rss.libsyn.com/shows/138806/destinations/865793.xml,regular,no,1,
+podcast:monday-morning-podcast,podcast,Monday Morning Podcast,https://rss.art19.com/monday-morning,regular,no,1,
+podcast:moral-mayhem,podcast,Moral Mayhem,https://api.substack.com/feed/podcast/2421572.rss,regular,no,1,
+podcast:no-jumper,podcast,No Jumper,https://feeds.megaphone.fm/NJP4856622419,regular,no,1,
+podcast:planet-money,podcast,Planet Money,https://feeds.npr.org/510289/podcast.xml,regular,no,1,
+podcast:pluribus-the-official-podcast,podcast,Pluribus: The Official Podcast,https://rss.art19.com/pluribus-pod,regular,no,1,
+podcast:policy-mccombs,podcast,Policy@McCombs,https://podcasts.la.utexas.edu/cepa/feed/podcast/policymccombs/,regular,no,0,Paused: no episode since 2024-02
+podcast:reasonably-optimistic,podcast,Reasonably Optimistic,https://podcast.posttv.com/itunes/impromptu.xml,regular,no,1,
+podcast:red-scare,podcast,Red Scare,https://rss.libsyn.com/shows/122643/destinations/721686.xml,regular,no,1,
+podcast:revolutions,podcast,Revolutions,https://rss.libsyn.com/shows/47475/destinations/159998.xml,regular,no,1,
+podcast:risky-business-with-nate-silver-and-maria-konnikova,podcast,Risky Business with Nate Silver and Maria Konnikova,https://www.omnycontent.com/d/playlist/e73c998e-6e60-432f-8610-ae210140c5b1/951120d9-cf6e-4224-93d7-b15c014dcea5/eb5e885e-6644-4680-aec4-b15c0150ffc0/podcast.rss,regular,no,1,
+podcast:subject-to-change,podcast,[Subject to Change],https://rss.buzzsprout.com/207869.rss,regular,no,1,
+podcast:the-bailey-podcast,podcast,The Bailey Podcast,https://api.substack.com/feed/podcast/1231658.rss,regular,no,0,Paused: no episode since 2024-04
+podcast:the-daily-stoic,podcast,The Daily Stoic,https://feeds.acast.com/public/shows/6abacdd76ffb28f8d6775e00,regular,no,1,
+podcast:the-ezra-klein-show,podcast,The Ezra Klein Show,https://feeds.simplecast.com/kEKXbjuJ,regular,no,1,
+podcast:the-fifth-column,podcast,The Fifth Column,https://api.substack.com/feed/podcast/815642.rss,regular,no,1,
+podcast:the-free-press-investigates,podcast,The Free Press Investigates,https://feeds.megaphone.fm/RUNMED9919162779,regular,no,1,
+podcast:the-gray-area-with-sean-illing,podcast,The Gray Area with Sean Illing,https://feeds.megaphone.fm/theezrakleinshow,regular,no,1,
+podcast:the-history-of-rome,podcast,The History of Rome,https://rss.libsyn.com/shows/17332/destinations/5627.xml,regular,no,0,Paused: no episode since 2024-11
+podcast:the-joe-rogan-experience,podcast,The Joe Rogan Experience,https://feeds.megaphone.fm/GLT1412515089,regular,no,1,
+podcast:the-journal,podcast,The Journal.,https://video-api.shdsvc.dowjones.io/api/podcasts/the%20journal/feed,regular,no,1,
+podcast:the-life-of-the-mind-by-steven-pinker,podcast,The Life Of The Mind by Steven Pinker,https://feeds.megaphone.fm/TIF3433493392,regular,no,0,Paused: no episode since 2024-07
+podcast:the-michael-shermer-show,podcast,The Michael Shermer Show,https://rss.libsyn.com/shows/98571/destinations/513978.xml,regular,no,1,
+podcast:the-mind-killer,podcast,The Mind Killer,https://api.substack.com/feed/podcast/161845.rss,regular,no,1,
+podcast:the-moynihan-report,podcast,The Moynihan Report,https://feeds.simplecast.com/SgmhH9DT,regular,no,1,
+podcast:the-remnant-with-jonah-goldberg,podcast,The Remnant with Jonah Goldberg,https://feeds.megaphone.fm/DISPME4897766830,regular,no,1,
+podcast:the-tim-dillon-show,podcast,The Tim Dillon Show,https://audioboom.com/channels/5093219.rss,regular,no,1,
+podcast:the-video-archives-podcast-with-quentin-tarantino,podcast,The Video Archives Podcast with Quentin Tarantino,https://rss.libsyn.com/shows/540572/destinations/4657952.xml,regular,no,0,Paused: no episode since 2025-09
+podcast:threedom,podcast,Threedom,https://feeds.megaphone.fm/LEME1560835092,regular,no,1,
+podcast:very-bad-wizards,podcast,Very Bad Wizards,https://rss.libsyn.com/shows/474285/destinations/4022211.xml,regular,no,1,
+podcast:we-might-be-drunk,podcast,We Might Be Drunk,https://feeds.megaphone.fm/YMH1251936023,regular,no,1,
+podcast:wisdom-of-crowds,podcast,Wisdom of Crowds,https://api.substack.com/feed/podcast/52255.rss,regular,no,1,
+podcast:your-welcome-with-michael-malice,podcast,"""YOUR WELCOME"" with Michael Malice",https://rss.art19.com/your-welcome-pod,regular,no,1,
