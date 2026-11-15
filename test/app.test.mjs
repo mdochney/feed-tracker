@@ -551,3 +551,29 @@ test('a text post is read aloud once, in pieces, and counted against the monthly
     assert.equal(store.has('substack:sid'), false);
   } finally { globalThis.fetch = realFetch; }
 });
+
+test('text posts get an estimated listening time from Substack word counts', async () => {
+  const { estimateSubstackText } = await import('../src/store.js');
+  const db = await createDb();
+  await db.prepare("INSERT INTO sources (key, platform, name, feed_url) VALUES ('substack:x', 'substack', 'X', 'https://x.example/feed')").run();
+  const now = new Date().toISOString();
+  const add = (guid, url, type = 'text') => db.prepare('INSERT INTO items (source_id, guid, title, url, media_type, published_at) VALUES (1, ?, ?, ?, ?, ?)').bind(guid, guid, url, type, now).run();
+  await add('long', 'https://x.example/p/long-post');
+  await add('short', 'https://x.example/p/short-post');
+  await add('gone', 'https://x.example/p/not-listed');
+  await add('pod', 'https://x.example/p/episode', 'audio');
+  let fetches = 0;
+  const fetchImpl = async (url) => {
+    fetches++;
+    assert.equal(url, 'https://x.example/api/v1/archive?sort=new&limit=25');
+    return Response.json({ posts: [{ slug: 'long-post', wordcount: 3200 }, { slug: 'short-post', wordcount: 40 }, { slug: 'episode', wordcount: 900 }] });
+  };
+  const source = await db.prepare('SELECT * FROM sources').first();
+  assert.equal(await estimateSubstackText(db, source, { fetchImpl }), 2);
+  const rows = Object.fromEntries((await db.prepare('SELECT guid, duration_sec FROM items').all()).results.map((r) => [r.guid, r.duration_sec]));
+  assert.deepEqual(rows, { long: 1200, short: 60, gone: 0, pod: null }, '3,200 words at 160 a minute is 20 minutes; audio items are left alone');
+  assert.equal(await estimateSubstackText(db, source, { fetchImpl }), 0);
+  assert.equal(fetches, 1, 'nothing is fetched once every text post has been looked up');
+  const long = await listItems(db, { view: 'new', minMinutes: 10 });
+  assert.deepEqual(long.items.map((i) => i.title).sort(), ['gone', 'long', 'pod'], 'the length filter now applies to text posts with a known length');
+});

@@ -195,6 +195,57 @@ export async function syncPrivateSubstackFeed(db, source, privateUrl, { fetchImp
   return stmts.length;
 }
 
+// ---- Listening time for text posts ---------------------------------------------
+// Substack's archive listing gives each post's word count, including posts behind the
+// paywall, in one request. That becomes an estimated read-aloud length.
+
+export const SPOKEN_WPM = 160;
+const spokenSeconds = (words) => Math.max(60, Math.round((words / SPOKEN_WPM) * 60));
+
+export async function estimateSubstackText(db, source, { fetchImpl = fetch } = {}) {
+  if (source.platform !== 'substack') return 0;
+  const since = new Date(Date.now() - 30 * 86400000).toISOString();
+  const { results: missing } = await db.prepare(
+    `SELECT id, url FROM items WHERE source_id = ? AND media_type = 'text' AND duration_sec IS NULL
+       AND url IS NOT NULL AND published_at >= ? ORDER BY published_at DESC LIMIT 25`).bind(source.id, since).all();
+  if (!missing.length) return 0;
+  let origin;
+  try { origin = new URL(missing[0].url).origin; } catch { return 0; }
+  const res = await fetchImpl(`${origin}/api/v1/archive?sort=new&limit=25`, { headers: { ...UA, accept: 'application/json' } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  const posts = Array.isArray(data) ? data : data?.posts ?? [];
+  const words = new Map(posts.filter((p) => p?.slug && p.wordcount > 0).map((p) => [p.slug, p.wordcount]));
+  const slug = (u) => { try { return new URL(u).pathname.match(/^\/p\/([^/]+)/)?.[1] ?? null; } catch { return null; } };
+  // 0 marks "looked, not found", so a post missing from the listing is not asked about again.
+  const stmts = missing.map((m) => {
+    const w = words.get(slug(m.url));
+    return db.prepare('UPDATE items SET duration_sec = ? WHERE id = ? AND duration_sec IS NULL').bind(w ? spokenSeconds(w) : 0, m.id);
+  });
+  await db.batch(stmts);
+  return missing.filter((m) => words.has(slug(m.url))).length;
+}
+
+export async function backfillTextEstimates(db, opts = {}, max = 3) {
+  if (max <= 0) return 0;
+  const since = new Date(Date.now() - 30 * 86400000).toISOString();
+  // Only untriaged and queued items, which keeps this on the status index.
+  const { results } = await db.prepare(
+    `SELECT DISTINCT i.source_id FROM items i JOIN sources s ON s.id = i.source_id
+     WHERE i.status IN ('new', 'queued') AND i.media_type = 'text' AND i.duration_sec IS NULL AND i.url IS NOT NULL
+       AND i.published_at >= ? AND s.platform = 'substack' AND s.active = 1 LIMIT ?`).bind(since, max).all();
+  let done = 0;
+  for (const { source_id: id } of results) {
+    const source = await db.prepare('SELECT * FROM sources WHERE id = ?').bind(id).first();
+    try { done += await estimateSubstackText(db, source, opts); } catch (err) {
+      // Mark them looked-at so one unreachable publication cannot block the rest forever.
+      await db.prepare("UPDATE items SET duration_sec = 0 WHERE source_id = ? AND media_type = 'text' AND duration_sec IS NULL AND status IN ('new', 'queued') AND published_at >= ?").bind(id, since).run();
+      console.warn(`${source.key}: post lengths unavailable (${err?.message ?? err})`);
+    }
+  }
+  return done;
+}
+
 export async function pollAndStore(db, source, opts = {}) {
   try {
     const result = await pollSource(source, opts);
@@ -205,6 +256,7 @@ export async function pollAndStore(db, source, opts = {}) {
         if (opts.enrichBudget) opts.enrichBudget.left--;
         await enrichSubstackAudio(db, source, opts);
       } catch (err) { console.warn(`${source.key}: episode details unavailable (${err?.message ?? err})`); }
+      try { await estimateSubstackText(db, source, opts); } catch (err) { console.warn(`${source.key}: post lengths unavailable (${err?.message ?? err})`); }
     }
     return { key: source.key, ok: true, inserted };
   } catch (err) {
@@ -242,12 +294,18 @@ export async function pollBatch(db, { limit = 20, concurrency = 6, sourceId = nu
   await Promise.all(Array.from({ length: Math.min(concurrency, sources.length) }, async () => {
     while (next < sources.length && budget.left - inFlight * 2 >= 2 + reserve) {
       inFlight++;
-      // Episode details cost two more requests; skip them when the run is nearly out.
-      const room = budget.left - inFlight * 2 >= 4 + reserve;
+      // Episode details and post lengths cost up to three more requests; skip them when the
+      // run is nearly out.
+      const room = budget.left - inFlight * 2 >= 5 + reserve;
       try { out.push(await pollAndStore(db, sources[next++], room ? opts : { ...opts, enrichBudget: { left: 0 } })); }
       finally { inFlight--; }
     }
   }));
+  // Text posts still waiting for a length (their feed has not changed since they arrived):
+  // a few sources per run, with what is left of the budget.
+  if (!sourceId) {
+    try { await backfillTextEstimates(db, opts, Math.min(3, budget.left - reserve)); } catch (err) { console.warn(`post lengths unavailable (${err?.message ?? err})`); }
+  }
   if (opts.youtubeApiKey && budget.left >= 1) {
     try { await fillYoutubeDurations(db, opts); } catch (err) { console.warn(`YouTube durations unavailable (${err?.message ?? err})`); }
   }
@@ -285,7 +343,8 @@ export async function listItems(db, { view = 'new', type = 'all', source = null,
   if (type === 'text') where.push("i.media_type = 'text'");
   if (type === 'av') where.push("i.media_type <> 'text'");
   if (source) { where.push('i.source_id = ?'); args.push(Number(source)); }
-  // Hides only items known to be shorter. Text posts and items with no recorded length stay.
+  // Hides only items known to be shorter (for text posts, the estimated listening time).
+  // Items with no recorded length stay.
   const minSec = Math.round((Number(minMinutes) || 0) * 60);
   if (minSec > 0) { where.push('(i.duration_sec IS NULL OR i.duration_sec = 0 OR i.duration_sec >= ?)'); args.push(minSec); }
   if (q) { where.push("i.title LIKE ? ESCAPE '\\'"); args.push('%' + q.replace(/[\\%_]/g, '\\$&') + '%'); }

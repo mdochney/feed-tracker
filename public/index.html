@@ -672,7 +672,11 @@ function rowFor(item, index) {
   const meta = el('div', 'meta');
   meta.append(el('span', 'src', item.source_name));
   meta.append(el('span', 'pill' + (item.media_type === 'text' ? '' : ' av'), typeLabel(item)));
-  if (item.duration_sec) meta.append(el('span', null, duration(item.duration_sec)));
+  if (item.duration_sec) {
+    const len = el('span', null, item.media_type === 'text' ? '~' + duration(item.duration_sec) + ' listen' : duration(item.duration_sec));
+    if (item.media_type === 'text') len.title = 'Estimated read-aloud time, from the post’s word count';
+    meta.append(len);
+  }
   if (item.published_at) {
     const when = el('span', null, age(item.published_at));
     when.title = stampFmt.format(new Date(item.published_at));
@@ -887,7 +891,7 @@ document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('clic
 $('source').addEventListener('change', (e) => { sourceFilter = e.target.value; loadItems().catch(report); });
 $('length').value = minMinutes;
 if ($('length').value !== minMinutes) minMinutes = $('length').value = '0';
-$('length').title = 'Hides audio and video known to be shorter. Text posts and items with no recorded length stay.';
+$('length').title = 'Hides items known to be shorter, using estimated listening time for text posts. Items with no recorded length stay.';
 $('length').addEventListener('change', (e) => {
   minMinutes = e.target.value;
   try { localStorage.setItem(LENGTH_KEY, minMinutes); } catch {}
