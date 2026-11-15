@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Feed Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: one dense reading column, a sticky control bar, rows grouped by day. */
+:root {
+  --bg: #f3f5f1;
+  --surface: #ffffff;
+  --ink: #18211d;
+  --muted: #5d6b64;
+  --line: #d9dfd8;
+  --accent: #1c6b58;
+  --accent-ink: #ffffff;
+  --accent-soft: #dcece6;
+  --av: #8a4b12;
+  --av-soft: #f6e6d2;
+  --warn: #9a3b2f;
+  --font-display: "Bricolage Grotesque", "IBM Plex Sans", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111614;
+    --surface: #19201d;
+    --ink: #e3e9e5;
+    --muted: #98a59e;
+    --line: #2b3531;
+    --accent: #63c3a8;
+    --accent-ink: #0c1512;
+    --accent-soft: #1f3a32;
+    --av: #e6ad6c;
+    --av-soft: #3a2b18;
+    --warn: #ee9486;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111614;
+  --surface: #19201d;
+  --ink: #e3e9e5;
+  --muted: #98a59e;
+  --line: #2b3531;
+  --accent: #63c3a8;
+  --accent-ink: #0c1512;
+  --accent-soft: #1f3a32;
+  --av: #e6ad6c;
+  --av-soft: #3a2b18;
+  --warn: #ee9486;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.45;
+}
+.wrap { max-width: 920px; margin: 0 auto; padding: 0 16px 96px; }
+header.top { padding: 22px 0 10px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; }
+h1 { font-family: var(--font-display); font-size: 26px; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+.snapshot { color: var(--muted); font-size: 13px; }
+.sync { font-size: 13px; color: var(--muted); margin-left: auto; }
+.sync.warn { color: var(--warn); }
+
+.bar {
+  position: sticky; top: 0; z-index: 5;
+  background: var(--bg);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.tab {
+  font: inherit; font-weight: 600; color: var(--muted);
+  background: none; border: 1px solid transparent; border-radius: 8px;
+  padding: 6px 12px; cursor: pointer; text-decoration: none;
+  display: inline-flex; gap: 8px; align-items: baseline;
+}
+.tab .n { font-variant-numeric: tabular-nums; font-weight: 500; font-size: 13px; }
+.tab[aria-current="page"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
+.tab:hover { color: var(--ink); }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.seg button {
+  font: inherit; font-size: 13px; color: var(--muted); background: none; border: 0;
+  padding: 6px 10px; cursor: pointer; border-right: 1px solid var(--line);
+}
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--ink); font-weight: 600; }
+select, input[type="search"] {
+  font: inherit; font-size: 13px; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 8px; min-width: 0;
+}
+select { max-width: 220px; }
+input[type="search"] { flex: 1 1 140px; max-width: 260px; }
+.showing { color: var(--muted); font-size: 13px; margin-left: auto; font-variant-numeric: tabular-nums; }
+
+.day {
+  font-family: var(--font-display); font-weight: 600; font-size: 14px;
+  color: var(--muted); margin: 22px 0 6px; display: flex; gap: 8px; align-items: baseline;
+}
+.day .n { font-family: var(--font-body); font-weight: 400; font-size: 12px; font-variant-numeric: tabular-nums; }
+.list { display: flex; flex-direction: column; gap: 6px; }
+.row {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; display: grid; grid-template-columns: 1fr auto; gap: 4px 14px; align-items: start;
+  scroll-margin-top: 130px;
+}
+.row.sel { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.src { font-weight: 600; color: var(--ink); }
+.pill { font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 1px 8px; background: var(--accent-soft); color: var(--accent); }
+.pill.av { background: var(--av-soft); color: var(--av); }
+.pill.state { background: none; border: 1px solid var(--line); color: var(--muted); }
+.title { font-weight: 600; font-size: 15.5px; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
+.title:hover { text-decoration: underline; }
+.sum { color: var(--muted); font-size: 13.5px; margin: 2px 0 0; max-width: 68ch; overflow-wrap: anywhere; }
+.extra { font-size: 12.5px; }
+.extra a { color: var(--accent); }
+.main { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.acts { display: flex; gap: 6px; align-items: center; }
+.btn {
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  border-radius: 8px; padding: 6px 12px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); white-space: nowrap;
+}
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn:hover { filter: brightness(0.96); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.empty { color: var(--muted); padding: 40px 0; text-align: left; }
+.more { margin: 16px 0; }
+.keys { color: var(--muted); font-size: 12.5px; margin-top: 28px; }
+kbd { font-family: var(--font-body); font-size: 12px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; background: var(--surface); color: var(--ink); }
+.toast {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+  background: var(--ink); color: var(--bg); border-radius: 10px; padding: 8px 10px 8px 14px;
+  display: none; gap: 12px; align-items: center; font-size: 13.5px; max-width: calc(100vw - 32px); z-index: 10;
+}
+.toast.on { display: flex; }
+.toast button { font: inherit; font-weight: 600; background: none; border: 1px solid currentColor; color: inherit; border-radius: 7px; padding: 3px 10px; cursor: pointer; }
+.toast span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 620px) {
+  .row { grid-template-columns: 1fr; }
+  .acts { justify-content: flex-start; margin-top: 4px; }
+  .btn { padding: 8px 14px; }
+  .keys { display: none; }
+  .sync { margin-left: 0; width: 100%; }
+  .showing { width: 100%; margin-left: 0; }
+}
+
+.thumb { width: 112px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; background: var(--line); flex: none; }
+.body { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-top: 16px; }
+.panel h2 { font-family: var(--font-display); font-size: 16px; margin: 0 0 8px; }
+.panel form { display: flex; gap: 8px; flex-wrap: wrap; }
+.panel input[type="url"], .panel input[type="text"], .panel input[type="password"] {
+  font: inherit; font-size: 14px; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 7px 10px; flex: 1 1 260px; min-width: 0;
+}
+.hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+.note { font-size: 13.5px; margin: 8px 0 0; }
+.note.bad { color: var(--warn); }
+table.sources { width: 100%; border-collapse: collapse; font-size: 14px; }
+.sources th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.sources td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.sources tr.off td { color: var(--muted); }
+.sources .num { text-align: right; font-variant-numeric: tabular-nums; }
+.sources .err { color: var(--warn); font-size: 12.5px; }
+.tablewrap { overflow-x: auto; }
+.btn.small { padding: 4px 9px; font-size: 12.5px; }
+.btn[disabled] { opacity: 0.55; cursor: default; }
+[hidden] { display: none !important; }
+@media (max-width: 620px) { .thumb { width: 84px; } }
+.player {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 9;
+  background: var(--surface); border-top: 1px solid var(--line);
+  padding: 8px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+}
+.player-title { flex: 1 1 220px; min-width: 0; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player audio { flex: 2 1 280px; min-width: 0; height: 36px; }
+body.playing .wrap { padding-bottom: 170px; }
+body.playing .toast { bottom: 96px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Feed Tracker</h1>
+    <span class="snapshot" id="snapshot"></span>
+    <span class="sync" id="sync"></span>
+  </header>
+
+  <section class="panel" id="signin" hidden>
+    <h2>Sign in</h2>
+    <form id="signin-form">
+      <input type="password" id="token" autocomplete="current-password" placeholder="App token" aria-label="App token" required>
+      <button class="btn primary" type="submit">Sign in</button>
+    </form>
+    <p class="hint">This is the APP_TOKEN secret set on the Worker. It is kept in this browser.</p>
+    <p class="note bad" id="signin-note" hidden></p>
+  </section>
+
+  <div id="app" hidden>
+    <div class="bar">
+      <nav class="tabs" aria-label="Views">
+        <a class="tab" href="#new" data-view="new">New <span class="n" id="n-new">0</span></a>
+        <a class="tab" href="#queue" data-view="queue">Watch next <span class="n" id="n-queue">0</span></a>
+        <a class="tab" href="#cleared" data-view="cleared">Cleared <span class="n" id="n-cleared">0</span></a>
+        <a class="tab" href="#sources" data-view="sources">Sources <span class="n" id="n-sources">0</span></a>
+      </nav>
+      <div class="filters" id="filters">
+        <div class="seg" role="group" aria-label="Content type">
+          <button type="button" data-type="all" aria-pressed="true">All</button>
+          <button type="button" data-type="av" aria-pressed="false">Audio / video</button>
+          <button type="button" data-type="text" aria-pressed="false">Text</button>
+        </div>
+        <select id="source" aria-label="Source"></select>
+        <input type="search" id="search" placeholder="Search titles" aria-label="Search titles">
+        <span class="showing" id="showing"></span>
+      </div>
+    </div>
+
+    <main id="list"></main>
+
+    <section id="sources-view" hidden>
+      <div class="panel">
+        <h2>Add a subscription</h2>
+        <form id="add-form">
+          <input type="text" id="add-url" placeholder="YouTube channel, Substack or feed URL" aria-label="Address of the channel, publication or feed" required>
+          <button class="btn primary" type="submit" id="add-btn">Add</button>
+        </form>
+        <p class="hint">Paste a YouTube channel page, a Substack address, or any RSS or podcast feed.</p>
+        <p class="note" id="add-note" hidden></p>
+      </div>
+      <div class="panel">
+        <h2>Your subscriptions</h2>
+        <p class="hint" style="margin:0 0 8px">Pause hides a source’s new items and stops checking it. Remove also deletes its items from the tracker.</p>
+        <div class="tablewrap"><table class="sources">
+          <thead><tr><th>Source</th><th>Type</th><th class="num">New</th><th>Last checked</th><th></th></tr></thead>
+          <tbody id="sources-body"></tbody>
+        </table></div>
+        <p style="margin:12px 0 0"><button class="btn" type="button" id="poll-btn">Check for new items now</button> <span class="hint" id="poll-note"></span></p>
+      </div>
+    </section>
+
+    <p class="keys" id="keys">
+      Keys: <kbd>j</kbd> <kbd>k</kbd> move · <kbd>q</kbd> add to watch next · <kbd>x</kbd> dismiss ·
+      <kbd>d</kbd> mark done · <kbd>o</kbd> open · <kbd>u</kbd> undo
+    </p>
+  </div>
+</div>
+
+<div class="player" id="player" hidden>
+  <span class="player-title" id="player-title"></span>
+  <audio id="audio" controls preload="none"></audio>
+  <button class="btn small" type="button" id="player-close">Close</button>
+</div>
+
+<div class="toast" id="toast" role="status"><span id="toast-text"></span><button type="button" id="toast-undo">Undo</button></div>
+
+<script>
+const PAGE = 100;
+const ITEM_VIEWS = ['new', 'queue', 'cleared'];
+const TOKEN_KEY = 'feed-tracker-token';
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+};
+
+// ---- state -----------------------------------------------------------------
+let token = '';
+try { token = localStorage.getItem(TOKEN_KEY) || ''; } catch {}
+let view = 'new';
+let typeFilter = 'all';
+let sourceFilter = '';
+let query = '';
+let items = [];
+let total = 0;
+let more = false;
+let sel = 0;
+let counts = { new: 0, queue: 0, cleared: 0 };
+let sources = [];
+let loadSeq = 0;
+const undo = [];
+
+// ---- API -------------------------------------------------------------------
+class ApiError extends Error { constructor(status, message) { super(message); this.status = status; } }
+
+async function api(path, { method = 'GET', body } = {}) {
+  let res;
+  try {
+    res = await fetch('/api' + path, {
+      method,
+      headers: { authorization: 'Bearer ' + token, ...(body ? { 'content-type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch { throw new ApiError(0, 'Can’t reach the server. Check your connection and try again.'); }
+  let data = null;
+  try { data = await res.json(); } catch {}
+  if (res.status === 401) { showSignin(token ? 'That token was not accepted.' : ''); throw new ApiError(401, 'Sign in required'); }
+  if (!res.ok) throw new ApiError(res.status, (data && data.error) || 'Request failed (' + res.status + ')');
+  return data;
+}
+
+function report(err) {
+  if (err.status === 401) return;
+  const s = $('sync');
+  s.textContent = err.message;
+  s.classList.add('warn');
+}
+function clearReport() { $('sync').textContent = ''; $('sync').classList.remove('warn'); }
+
+// ---- sign in ---------------------------------------------------------------
+function showSignin(message) {
+  $('app').hidden = true;
+  $('signin').hidden = false;
+  $('signin-note').hidden = !message;
+  $('signin-note').textContent = message || '';
+  $('token').focus();
+}
+$('signin-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  token = $('token').value.trim();
+  try { localStorage.setItem(TOKEN_KEY, token); } catch {}
+  $('signin').hidden = true;
+  start();
+});
+
+// ---- helpers ---------------------------------------------------------------
+function age(iso) {
+  if (!iso) return '';
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 60) return mins + 'm ago';
+  if (mins < 60 * 36) return Math.round(mins / 60) + 'h ago';
+  return Math.round(mins / 1440) + 'd ago';
+}
+const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+const stampFmt = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+function dayLabel(iso) {
+  const d = new Date(iso), today = new Date();
+  const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((start(today) - start(d)) / 86400000);
+  return diff === 0 ? 'Today' : diff === 1 ? 'Yesterday' : dayFmt.format(d);
+}
+function duration(sec) {
+  if (!sec) return '';
+  const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+  return h ? h + 'h ' + m + 'm' : m + ' min';
+}
+const safeUrl = (u) => (typeof u === 'string' && /^https?:\/\//i.test(u) ? u : null);
+const typeLabel = (i) => (i.media_type === 'text' ? 'Text' : i.platform === 'youtube' || i.media_type === 'video' ? 'Video' : i.platform === 'substack' ? 'Audio / video' : 'Audio');
+const PLATFORM = { youtube: 'YouTube', substack: 'Substack', podcast: 'Podcast', rss: 'Feed' };
+
+function button(label, cls, fn) {
+  const b = el('button', 'btn' + (cls ? ' ' + cls : ''), label);
+  b.type = 'button';
+  b.addEventListener('click', fn);
+  return b;
+}
+
+let toastTimer = null;
+function showToast(text, canUndo) {
+  $('toast-text').textContent = text;
+  $('toast-undo').hidden = !canUndo;
+  $('toast').classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, 6000);
+}
+function hideToast() { $('toast').classList.remove('on'); }
+
+// One player for the whole page, so triaging the list never interrupts playback.
+function play(item) {
+  const media = safeUrl(item.media_url);
+  if (!media) return;
+  const audio = $('audio');
+  $('player-title').textContent = item.source_name + ' · ' + item.title;
+  $('player').hidden = false;
+  document.body.classList.add('playing');
+  if (audio.src !== media) audio.src = media;
+  audio.play().catch(() => {}); // the controls are there if autoplay is refused
+}
+$('player-close').addEventListener('click', () => {
+  const audio = $('audio');
+  audio.pause(); audio.removeAttribute('src'); audio.load();
+  $('player').hidden = true;
+  document.body.classList.remove('playing');
+});
+
+// ---- loading ---------------------------------------------------------------
+async function loadState() {
+  const state = await api('/state');
+  counts = state.counts;
+  sources = state.sources;
+  renderChrome();
+}
+
+async function loadItems({ append = false } = {}) {
+  if (!ITEM_VIEWS.includes(view)) return;
+  const seq = ++loadSeq;
+  const p = new URLSearchParams({ view, type: typeFilter, limit: String(PAGE), offset: String(append ? items.length : 0) });
+  if (sourceFilter) p.set('source', sourceFilter);
+  if (query.trim()) p.set('q', query.trim());
+  const data = await api('/items?' + p);
+  if (seq !== loadSeq) return; // a newer request superseded this one
+  items = append ? items.concat(data.items) : data.items;
+  total = data.total;
+  more = data.more;
+  if (!append) sel = 0;
+  renderItems();
+}
+
+async function refresh() {
+  try { await Promise.all([loadState(), loadItems()]); clearReport(); } catch (err) { report(err); }
+}
+
+// ---- actions ---------------------------------------------------------------
+const LABELS = { queued: 'Added to watch next', dismissed: 'Dismissed', done: 'Marked done', new: 'Moved back to new' };
+const bucket = (s) => (s === 'queued' ? 'queue' : s === 'new' ? 'new' : 'cleared');
+
+async function setStatus(item, status, { record = true } = {}) {
+  const prev = item.status;
+  // Optimistic: drop the row and move the counts, then confirm with the server.
+  const index = items.indexOf(item);
+  if (index >= 0) { items.splice(index, 1); total = Math.max(0, total - 1); }
+  counts[bucket(prev)] = Math.max(0, counts[bucket(prev)] - 1);
+  counts[bucket(status)]++;
+  sel = Math.min(sel, Math.max(0, items.length - 1));
+  renderChrome(); renderItems();
+  if (record) { undo.push({ item, prev }); showToast(LABELS[status] + ': ' + item.title, true); }
+  try {
+    await api('/items/' + item.id, { method: 'POST', body: { status } });
+    item.status = status;
+    if (items.length < 10 && more) loadItems().catch(report);
+  } catch (err) {
+    report(err);
+    if (record) undo.pop();
+    refresh();
+  }
+}
+
+async function undoLast() {
+  const last = undo.pop();
+  hideToast();
+  if (!last) return;
+  try {
+    await api('/items/' + last.item.id, { method: 'POST', body: { status: last.prev } });
+    await refresh();
+  } catch (err) { report(err); }
+}
+
+// ---- rendering -------------------------------------------------------------
+function renderChrome() {
+  for (const v of ITEM_VIEWS) $('n-' + v).textContent = counts[v];
+  $('n-sources').textContent = sources.filter((s) => s.active).length;
+  document.querySelectorAll('.tab').forEach((t) => {
+    if (t.dataset.view === view) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
+  });
+  const isItems = ITEM_VIEWS.includes(view);
+  $('filters').hidden = !isItems;
+  $('list').hidden = !isItems;
+  $('keys').hidden = !isItems;
+  $('sources-view').hidden = isItems;
+
+  const select = $('source');
+  const keep = sourceFilter;
+  select.textContent = '';
+  select.append(new Option('All sources', ''));
+  for (const s of sources) if (s.active) select.append(new Option(s.name, String(s.id)));
+  select.value = keep;
+  if (select.value !== keep) sourceFilter = '';
+
+  const latest = sources.map((s) => s.last_polled_at).filter(Boolean).sort().at(-1);
+  $('snapshot').textContent = latest ? 'Last checked ' + age(latest) : 'Not checked yet';
+  if (!isItems) renderSources();
+}
+
+function rowFor(item, index) {
+  const row = el('article', 'row' + (index === sel ? ' sel' : ''));
+  row.dataset.index = index;
+  const body = el('div', 'body');
+  const thumb = safeUrl(item.thumbnail_url);
+  if (thumb) {
+    const img = el('img', 'thumb');
+    img.src = thumb; img.alt = ''; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
+    img.addEventListener('error', () => img.remove());
+    body.append(img);
+  }
+  const main = el('div', 'main');
+  const meta = el('div', 'meta');
+  meta.append(el('span', 'src', item.source_name));
+  meta.append(el('span', 'pill' + (item.media_type === 'text' ? '' : ' av'), typeLabel(item)));
+  if (item.duration_sec) meta.append(el('span', null, duration(item.duration_sec)));
+  if (item.published_at) {
+    const when = el('span', null, age(item.published_at));
+    when.title = stampFmt.format(new Date(item.published_at));
+    meta.append(when);
+  }
+  if (item.status === 'done') meta.append(el('span', 'pill state', 'Done'));
+  if (item.status === 'dismissed') meta.append(el('span', 'pill state', 'Dismissed'));
+  main.append(meta);
+
+  const href = safeUrl(item.url);
+  const title = el(href ? 'a' : 'span', 'title', item.title);
+  if (href) { title.href = href; title.target = '_blank'; title.rel = 'noopener noreferrer'; }
+  main.append(title);
+  if (item.summary) main.append(el('p', 'sum', item.summary));
+  const media = safeUrl(item.media_url);
+  if (media) {
+    const extra = el('div', 'extra');
+    extra.append(button('Play audio', 'small', () => play(item)));
+    main.append(extra);
+  }
+  body.append(main);
+  row.append(body);
+
+  const acts = el('div', 'acts');
+  if (view === 'new') {
+    acts.append(button('Watch next', 'primary', () => setStatus(item, 'queued')));
+    acts.append(button('Dismiss', '', () => setStatus(item, 'dismissed')));
+  } else if (view === 'queue') {
+    acts.append(button('Done', 'primary', () => setStatus(item, 'done')));
+    acts.append(button('Remove', '', () => setStatus(item, 'new')));
+  } else {
+    acts.append(button('Restore', '', () => setStatus(item, 'new')));
+  }
+  row.append(acts);
+  row.addEventListener('click', (e) => {
+    if (e.target.closest('button, a')) return;
+    sel = index; markSelection();
+  });
+  return row;
+}
+
+function markSelection() {
+  document.querySelectorAll('.row').forEach((r) => r.classList.toggle('sel', Number(r.dataset.index) === sel));
+}
+
+function renderItems() {
+  const list = $('list');
+  list.textContent = '';
+  const filtered = typeFilter !== 'all' || sourceFilter || query.trim();
+  $('showing').textContent = items.length === total ? total + ' items' : 'Showing ' + items.length + ' of ' + total;
+  if (!items.length) {
+    const msg = filtered ? 'Nothing matches these filters.'
+      : view === 'new' ? (sources.length ? 'You are caught up. Nothing new.' : 'No subscriptions yet. Add one under Sources.')
+      : view === 'queue' ? 'Nothing in watch next yet. Add items from New.'
+      : 'Nothing dismissed or finished yet.';
+    list.append(el('p', 'empty', msg));
+    return;
+  }
+  let group = null, lastDay = null;
+  items.forEach((item, index) => {
+    if (view === 'new' && item.published_at) {
+      const day = dayLabel(item.published_at);
+      if (day !== lastDay) {
+        lastDay = day;
+        list.append(el('h2', 'day', day));
+        group = el('div', 'list');
+        list.append(group);
+      }
+    } else if (!group) {
+      group = el('div', 'list');
+      group.style.marginTop = '14px';
+      list.append(group);
+    }
+    group.append(rowFor(item, index));
+  });
+  if (more) {
+    const wrap = el('div', 'more');
+    wrap.append(button('Show more', '', () => loadItems({ append: true }).catch(report)));
+    list.append(wrap);
+  }
+}
+
+function renderSources() {
+  const body = $('sources-body');
+  body.textContent = '';
+  if (!sources.length) {
+    const tr = el('tr'); const td = el('td', null, 'No subscriptions yet. Add one above.'); td.colSpan = 5; tr.append(td); body.append(tr);
+    return;
+  }
+  for (const s of sources) {
+    const tr = el('tr', s.active ? '' : 'off');
+    const name = el('td');
+    const site = safeUrl(s.site_url);
+    const link = el(site ? 'a' : 'span', null, s.name);
+    if (site) { link.href = site; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.style.color = 'inherit'; }
+    name.append(link);
+    if (!s.active) name.append(el('span', 'pill state', 'Paused'));
+    if (s.last_status && s.last_status.startsWith('error')) name.append(el('div', 'err', 'Last check failed: ' + s.last_status.slice(7)));
+    tr.append(name);
+    tr.append(el('td', null, PLATFORM[s.platform] || s.platform));
+    tr.append(el('td', 'num', String(s.new_count)));
+    tr.append(el('td', null, s.last_polled_at ? age(s.last_polled_at) : 'Never'));
+    const acts = el('td');
+    const wrap = el('div', 'acts');
+    wrap.style.justifyContent = 'flex-end';
+    wrap.append(button(s.active ? 'Pause' : 'Resume', 'small', async (e) => {
+      e.currentTarget.disabled = true;
+      try { await api('/sources/' + s.id, { method: 'PATCH', body: { active: !s.active } }); await refresh(); } catch (err) { report(err); }
+    }));
+    let armed = false;
+    wrap.append(button('Remove', 'small', async (e) => {
+      const b = e.currentTarget;
+      if (!armed) { armed = true; b.textContent = 'Confirm remove'; setTimeout(() => { armed = false; b.textContent = 'Remove'; }, 4000); return; }
+      b.disabled = true;
+      try { await api('/sources/' + s.id, { method: 'DELETE' }); showToast('Removed ' + s.name, false); await refresh(); } catch (err) { report(err); }
+    }));
+    acts.append(wrap);
+    tr.append(acts);
+    body.append(tr);
+  }
+}
+
+// ---- wiring ----------------------------------------------------------------
+function setView(v) {
+  view = [...ITEM_VIEWS, 'sources'].includes(v) ? v : 'new';
+  items = []; total = 0; more = false; sel = 0;
+  renderChrome();
+  if (ITEM_VIEWS.includes(view)) { renderItems(); loadItems().catch(report); }
+}
+window.addEventListener('hashchange', () => setView(location.hash.slice(1)));
+
+document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => {
+  typeFilter = b.dataset.type;
+  document.querySelectorAll('.seg button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  loadItems().catch(report);
+}));
+$('source').addEventListener('change', (e) => { sourceFilter = e.target.value; loadItems().catch(report); });
+let searchTimer = null;
+$('search').addEventListener('input', (e) => {
+  query = e.target.value;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => loadItems().catch(report), 250);
+});
+$('toast-undo').addEventListener('click', undoLast);
+
+$('add-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const note = $('add-note'), btn = $('add-btn');
+  btn.disabled = true; btn.textContent = 'Adding…';
+  note.hidden = true;
+  try {
+    const res = await api('/sources', { method: 'POST', body: { url: $('add-url').value } });
+    note.className = 'note';
+    note.textContent = (res.created ? 'Added ' : 'Already subscribed to ') + res.source.name +
+      (res.polled && res.polled.ok ? '. ' + res.polled.inserted + ' items loaded.' : res.polled ? '. The first check failed: ' + res.polled.error : '.');
+    $('add-url').value = '';
+    await refresh();
+  } catch (err) {
+    if (err.status !== 401) { note.className = 'note bad'; note.textContent = err.message; }
+  }
+  note.hidden = false;
+  btn.disabled = false; btn.textContent = 'Add';
+});
+
+$('poll-btn').addEventListener('click', async (e) => {
+  const b = e.currentTarget;
+  b.disabled = true;
+  $('poll-note').textContent = 'Checking…';
+  try {
+    const res = await api('/poll', { method: 'POST', body: {} });
+    $('poll-note').textContent = 'Checked ' + res.polled + ' sources, ' + res.inserted + ' new items' + (res.failed.length ? ', ' + res.failed.length + ' failed' : '') + '.';
+    await refresh();
+  } catch (err) { $('poll-note').textContent = err.status === 401 ? '' : err.message; }
+  b.disabled = false;
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || !ITEM_VIEWS.includes(view)) return;
+  if (e.target.closest('input, select, textarea, audio')) return;
+  const item = items[sel];
+  const k = e.key.toLowerCase();
+  if (k === 'j' || k === 'k') {
+    sel = Math.max(0, Math.min(items.length - 1, sel + (k === 'j' ? 1 : -1)));
+    markSelection();
+    document.querySelector('.row.sel')?.scrollIntoView({ block: 'nearest' });
+  } else if (k === 'u') { undoLast(); }
+  else if (!item) { return; }
+  else if (k === 'q' && view === 'new') setStatus(item, 'queued');
+  else if (k === 'x' && view === 'new') setStatus(item, 'dismissed');
+  else if (k === 'd' && view === 'queue') setStatus(item, 'done');
+  else if (k === 'o') { document.querySelector('.row.sel a.title')?.click(); }
+  else return;
+  e.preventDefault();
+});
+
+async function start() {
+  if (!token) { showSignin(''); return; }
+  try {
+    await loadState();
+    $('app').hidden = false;
+    setView(location.hash.slice(1));
+  } catch (err) {
+    if (err.status !== 401) { $('app').hidden = false; report(err); }
+  }
+}
+start();
+// Pick up newly polled items when the tab comes back into view.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !token || $('app').hidden) return;
+  if (view === 'new' && !undo.length) refresh(); else loadState().catch(report);
+});
+</script>
+</body>
+</html>

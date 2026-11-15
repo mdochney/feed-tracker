@@ -12,9 +12,13 @@ triage each item: add to the watch-next queue, or dismiss.
   - Substack: `https://<pub>.substack.com/feed`. Paid shows use a per-subscriber private
     feed URL.
   - Spotify shows: resolved once to their public RSS feed; no Spotify API at runtime.
-- **Stack:** Cloudflare Worker + D1, hourly cron poller, one responsive page (desktop
-  first with keyboard triage, usable on a phone, installable as a PWA). Cloudflare
-  Access in front for login.
+- **Stack:** Cloudflare Worker + D1, cron poller, one responsive page (desktop first
+  with keyboard triage, usable on a phone).
+- **Login:** the API requires a bearer token (`APP_TOKEN` secret) and refuses everything
+  if the secret is not set. Cloudflare Access can be added in front later.
+- **Plan limits:** the poller as built assumes Workers Paid. On the free plan (10 ms CPU,
+  50 subrequests per run) polling would have to move elsewhere, for example a scheduled
+  GitHub Action that pushes parsed items to the Worker.
 - **Text posts are included** and can be listened to: audio is generated when a post is
   queued (not on ingest), stored in R2, with browser speech synthesis as the fallback.
 - **Secrets stay out of the repo.** Private feed URLs are credentials. They live in the
@@ -51,10 +55,13 @@ See `migrations/0001_init.sql`.
 - [ ] YouTube seed (needs Takeout `subscriptions.csv`)
 - [ ] Podcast seed (needs the list of Spotify shows; resolve each to RSS)
 - [ ] Private feed URLs for paid Substack shows
-- [ ] Worker: cron poller writing to D1, first-run backfill rule (auto-dismiss anything
-      older than about a week)
-- [ ] JSON API: list items, change status, reorder queue
-- [ ] UI: new-items feed, queue view, keyboard shortcuts, undo
+- [x] Worker: cron poller writing to D1, first-run backfill rule (items older than a
+      week start out dismissed)
+- [x] JSON API: list items, change status, add / pause / remove sources, poll on demand
+- [x] UI: new-items feed, queue, cleared, sources, keyboard shortcuts, undo, one
+      page-wide audio player
+- [ ] Deploy (needs a Cloudflare account; see README)
+- [ ] Queue reordering, PWA manifest, YouTube embeds
 - [ ] Cross-posting dedupe via `shows`
 - [ ] Text-to-voice: article extraction, TTS on queue, R2 storage, Gmail as the text
       source for paid posts

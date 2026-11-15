@@ -11,7 +11,7 @@ CREATE TABLE shows (
 CREATE TABLE sources (
   id              INTEGER PRIMARY KEY,
   key             TEXT NOT NULL UNIQUE,          -- e.g. 'substack:samharris', 'youtube:UCxxxx'
-  platform        TEXT NOT NULL CHECK (platform IN ('youtube', 'substack', 'podcast')),
+  platform        TEXT NOT NULL CHECK (platform IN ('youtube', 'substack', 'podcast', 'rss')),
   name            TEXT NOT NULL,
   feed_url        TEXT NOT NULL,                 -- public feed; private overrides come from the PRIVATE_FEEDS secret
   site_url        TEXT,

@@ -1,0 +1,171 @@
+// D1 reads and writes. Everything takes a D1-style database (prepare/bind/run/all/first/batch)
+// so it runs in the Worker and, through a small shim, in Node tests.
+
+import { pollSource } from './poll.js';
+
+export const BACKFILL_DAYS = 7;   // on a source's first poll, older items start out dismissed
+const MAX_ITEMS_PER_POLL = 50;    // podcast feeds can carry a show's whole history
+
+export const nowIso = () => new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+
+const UPSERT_ITEM = `
+  INSERT INTO items (source_id, guid, title, url, published_at, media_type, media_url,
+                     duration_sec, thumbnail_url, summary, status, status_changed_at, first_seen_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT (source_id, guid) DO UPDATE SET
+    title = excluded.title,
+    url = excluded.url,
+    media_type = excluded.media_type,
+    media_url = excluded.media_url,
+    duration_sec = COALESCE(excluded.duration_sec, items.duration_sec),
+    thumbnail_url = COALESCE(excluded.thumbnail_url, items.thumbnail_url),
+    summary = excluded.summary`;
+
+// Write one poll result. One batch (a single D1 call) per source.
+export async function storePoll(db, source, result, at = nowIso()) {
+  if (result.status === 'not_modified') {
+    await db.prepare('UPDATE sources SET last_polled_at = ?, last_status = ? WHERE id = ?')
+      .bind(at, 'not_modified', source.id).run();
+    return { inserted: 0 };
+  }
+  const firstPoll = !source.last_polled_at;
+  const cutoff = new Date(Date.parse(at) - BACKFILL_DAYS * 86400000).toISOString();
+  const items = [...result.items]
+    .sort((a, b) => ((a.published_at ?? '') < (b.published_at ?? '') ? 1 : -1))
+    .slice(0, MAX_ITEMS_PER_POLL);
+
+  const before = await db.prepare('SELECT COUNT(*) AS n FROM items WHERE source_id = ?').bind(source.id).first();
+  const stmts = items.map((it) => {
+    const published = it.published_at ?? at;
+    const old = firstPoll && published < cutoff;
+    return db.prepare(UPSERT_ITEM).bind(
+      source.id, it.guid, it.title, it.url, published, it.media_type, it.media_url,
+      it.duration_sec, it.thumbnail_url, it.summary,
+      old ? 'dismissed' : 'new', old ? at : null, at);
+  });
+  stmts.push(db.prepare(
+    `UPDATE sources SET last_polled_at = ?, last_status = 'ok', etag = ?, last_modified = ?,
+            site_url = COALESCE(?, site_url) WHERE id = ?`)
+    .bind(at, result.etag ?? null, result.last_modified ?? null, result.site_url ?? null, source.id));
+  await db.batch(stmts);
+  const after = await db.prepare('SELECT COUNT(*) AS n FROM items WHERE source_id = ?').bind(source.id).first();
+  return { inserted: after.n - before.n };
+}
+
+export async function pollAndStore(db, source, opts = {}) {
+  try {
+    const result = await pollSource(source, opts);
+    const { inserted } = await storePoll(db, source, result);
+    return { key: source.key, ok: true, inserted };
+  } catch (err) {
+    const message = String(err?.message ?? err).slice(0, 200);
+    await db.prepare('UPDATE sources SET last_polled_at = ?, last_status = ? WHERE id = ?')
+      .bind(nowIso(), 'error: ' + message, source.id).run();
+    return { key: source.key, ok: false, error: message };
+  }
+}
+
+// Poll the sources that have waited longest. `limit` keeps one invocation inside the
+// platform's subrequest budget (each source costs one fetch plus a few D1 calls).
+export async function pollBatch(db, { limit = 20, concurrency = 6, sourceId = null, ...opts } = {}) {
+  const query = sourceId
+    ? db.prepare('SELECT * FROM sources WHERE id = ?').bind(sourceId)
+    : db.prepare('SELECT * FROM sources WHERE active = 1 ORDER BY last_polled_at IS NOT NULL, last_polled_at LIMIT ?').bind(limit);
+  const { results: sources } = await query.all();
+  const out = [];
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(concurrency, sources.length) }, async () => {
+    while (next < sources.length) out.push(await pollAndStore(db, sources[next++], opts));
+  }));
+  return out;
+}
+
+// ---- reads for the API -------------------------------------------------------
+
+const VIEW_SQL = {
+  new: { where: "i.status = 'new' AND s.active = 1", order: 'i.published_at DESC, i.id DESC' },
+  queue: { where: "i.status = 'queued'", order: 'i.queue_position ASC, i.id ASC' },
+  cleared: { where: "i.status IN ('dismissed', 'done')", order: 'i.status_changed_at DESC, i.id DESC' },
+};
+
+export async function listItems(db, { view = 'new', type = 'all', source = null, q = '', limit = 100, offset = 0 } = {}) {
+  const v = VIEW_SQL[view] ?? VIEW_SQL.new;
+  const where = [v.where];
+  const args = [];
+  if (type === 'text') where.push("i.media_type = 'text'");
+  if (type === 'av') where.push("i.media_type <> 'text'");
+  if (source) { where.push('i.source_id = ?'); args.push(Number(source)); }
+  if (q) { where.push("i.title LIKE ? ESCAPE '\\'"); args.push('%' + q.replace(/[\\%_]/g, '\\$&') + '%'); }
+  const cap = Math.max(1, Math.min(200, Number(limit) || 100));
+  const sql = `
+    SELECT i.id, i.source_id, s.name AS source_name, s.platform, i.title, i.url, i.published_at,
+           i.media_type, i.media_url, i.duration_sec, i.thumbnail_url, i.summary, i.status,
+           i.status_changed_at, i.tts_status
+    FROM items i JOIN sources s ON s.id = i.source_id
+    WHERE ${where.join(' AND ')}
+    ORDER BY ${v.order}
+    LIMIT ? OFFSET ?`;
+  const { results } = await db.prepare(sql).bind(...args, cap + 1, Math.max(0, Number(offset) || 0)).all();
+  const total = await db.prepare(
+    `SELECT COUNT(*) AS n FROM items i JOIN sources s ON s.id = i.source_id WHERE ${where.join(' AND ')}`)
+    .bind(...args).first();
+  return { items: results.slice(0, cap), more: results.length > cap, total: total.n };
+}
+
+export async function getState(db) {
+  const counts = await db.prepare(`
+    SELECT COALESCE(SUM(i.status = 'new' AND s.active = 1), 0) AS new,
+           COALESCE(SUM(i.status = 'queued'), 0) AS queue,
+           COALESCE(SUM(i.status IN ('dismissed', 'done')), 0) AS cleared
+    FROM items i JOIN sources s ON s.id = i.source_id`).first();
+  const { results: sources } = await db.prepare(`
+    SELECT s.id, s.key, s.platform, s.name, s.feed_url, s.site_url, s.active, s.last_polled_at, s.last_status,
+           (SELECT COUNT(*) FROM items i WHERE i.source_id = s.id AND i.status = 'new') AS new_count
+    FROM sources s ORDER BY s.name COLLATE NOCASE`).all();
+  return { counts, sources };
+}
+
+const STATUSES = new Set(['new', 'queued', 'dismissed', 'done']);
+
+export async function setItemStatus(db, id, status) {
+  if (!STATUSES.has(status)) throw new RangeError('Unknown status: ' + status);
+  const at = nowIso();
+  const res = await db.prepare(
+    `UPDATE items SET status = ?, status_changed_at = ?,
+            queue_position = CASE WHEN ? = 'queued' THEN ? ELSE NULL END
+     WHERE id = ?`)
+    .bind(status, status === 'new' ? null : at, status, Date.now(), Number(id)).run();
+  return (res.meta?.changes ?? 0) > 0;
+}
+
+export async function addSource(db, { key, platform, name, feed_url, site_url = null }) {
+  const existing = await db.prepare('SELECT * FROM sources WHERE key = ? OR feed_url = ?').bind(key, feed_url).first();
+  if (existing) {
+    if (!existing.active) await db.prepare('UPDATE sources SET active = 1 WHERE id = ?').bind(existing.id).run();
+    return { source: { ...existing, active: 1 }, created: false };
+  }
+  await db.prepare('INSERT INTO sources (key, platform, name, feed_url, site_url) VALUES (?, ?, ?, ?, ?)')
+    .bind(key, platform, name, feed_url, site_url).run();
+  const source = await db.prepare('SELECT * FROM sources WHERE key = ?').bind(key).first();
+  return { source, created: true };
+}
+
+export async function updateSource(db, id, { active, name }) {
+  const sets = [];
+  const args = [];
+  if (active !== undefined) { sets.push('active = ?'); args.push(active ? 1 : 0); }
+  if (typeof name === 'string' && name.trim()) { sets.push('name = ?'); args.push(name.trim().slice(0, 200)); }
+  if (!sets.length) return false;
+  const res = await db.prepare(`UPDATE sources SET ${sets.join(', ')} WHERE id = ?`).bind(...args, Number(id)).run();
+  return (res.meta?.changes ?? 0) > 0;
+}
+
+// Removing a source removes its items too (ON DELETE CASCADE needs foreign keys on,
+// which D1 enforces; the explicit delete keeps it true everywhere).
+export async function deleteSource(db, id) {
+  const res = await db.batch([
+    db.prepare('DELETE FROM items WHERE source_id = ?').bind(Number(id)),
+    db.prepare('DELETE FROM sources WHERE id = ?').bind(Number(id)),
+  ]);
+  return (res[1].meta?.changes ?? 0) > 0;
+}

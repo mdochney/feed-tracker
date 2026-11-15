@@ -9,22 +9,58 @@ The plan, decisions and build checklist are in [PLAN.md](PLAN.md).
 
 | Path | What |
 |---|---|
+| `public/index.html` | The app: New, Watch next, Cleared and Sources views |
+| `src/worker.js` | Cloudflare Worker: JSON API under `/api`, polling on a cron trigger |
+| `src/store.js` | D1 reads and writes (upserts, first-run backfill, status changes) |
+| `src/resolve.js` | Turns a pasted YouTube, Substack or feed URL into a source |
+| `src/feeds.js`, `src/poll.js` | RSS/Atom parsing and fetching one source |
+| `migrations/` | D1 schema and the seeded subscription list |
 | `seeds/*.csv` | Subscription lists (public feed URLs only) |
-| `migrations/0001_init.sql` | D1 schema |
-| `src/feeds.js` | RSS/Atom parsing into a common item shape |
-| `src/poll.js` | Fetch one source (conditional GET, private feed override) |
-| `scripts/check-feeds.mjs` | Fetch every seed feed once and report coverage |
-| `test/` | Parser and poller tests against fixtures |
+| `scripts/` | Feed coverage check, seed migration generator, static preview builder |
+| `test/` | Parser, store and API tests |
 
-## Usage
+## Run it locally
 
 ```sh
 npm install
 npm test
-npm run check-feeds        # writes reports/feed-coverage.csv
+echo "APP_TOKEN=local-dev-token" > .dev.vars
+npm run migrate:local
+npm run dev                # http://localhost:8787, sign in with the token above
 ```
 
-For paid feeds, create `private-feeds.json` (git-ignored) next to `package.json`:
+Open Sources and press "Check for new items now" a few times to load the feeds
+(each press checks the 20 sources that have waited longest).
+
+## Deploy to Cloudflare
+
+Needs a Cloudflare account. As built, the poller needs the Workers Paid plan: the
+free plan allows 10 ms of CPU and 50 subrequests per run, which is not enough to
+fetch and parse a batch of feeds.
+
+```sh
+npx wrangler login
+npx wrangler d1 create feed-tracker      # copy the database_id into wrangler.toml
+npm run migrate                          # schema + seeded subscriptions
+npx wrangler secret put APP_TOKEN        # a long random string; the page asks for it once per browser
+npx wrangler secret put PRIVATE_FEEDS    # optional: {"substack:samharris":"https://..."}
+npm run deploy
+```
+
+The cron trigger then checks 20 sources every 10 minutes, so every source is
+checked at least hourly up to about 120 sources. Raise `POLL_BATCH` in
+`wrangler.toml` as the list grows.
+
+## Other commands
+
+```sh
+npm run check-feeds        # fetch every seed feed once, write reports/feed-coverage.csv
+npm run build-preview      # static snapshot of the triage page, reports/preview.html
+node scripts/make-seed-sql.mjs migrations/0003_more_sources.sql   # after editing seeds/
+```
+
+For paid feeds when running the scripts locally, create `private-feeds.json`
+(git-ignored) next to `package.json`:
 
 ```json
 { "substack:samharris": "https://api.substack.com/feed/podcast/…" }
