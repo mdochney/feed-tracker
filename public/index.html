@@ -165,6 +165,9 @@ kbd { font-family: var(--font-body); font-size: 12px; border: 1px solid var(--li
 .thumb { width: 112px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; background: var(--line); flex: none; }
 .body { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-top: 16px; }
+.meter { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
+.meter span { display: block; height: 100%; width: 0; background: var(--accent, #1f6f5c); border-radius: 5px; }
+.meter.high span { background: #c0392b; }
 .panel h2 { font-family: var(--font-display); font-size: 16px; margin: 0 0 8px; }
 .panel form { display: flex; gap: 8px; flex-wrap: wrap; }
 .panel input[type="url"], .panel input[type="text"], .panel input[type="password"] {
@@ -260,6 +263,11 @@ body.playing .toast { bottom: 96px; }
         </form>
         <p class="hint">Paste a YouTube channel page, a Substack address, or any RSS or podcast feed.</p>
         <p class="note" id="add-note" hidden></p>
+      </div>
+      <div class="panel" id="voice-panel" hidden>
+        <h2>Read aloud allowance</h2>
+        <div class="meter" id="voice-meter" role="img"><span id="voice-bar"></span></div>
+        <p class="hint" id="voice-text" style="margin:8px 0 0"></p>
       </div>
       <div class="panel" id="substack-panel" hidden>
         <h2>Substack sign-in</h2>
@@ -454,6 +462,8 @@ async function listen(item, btn) {
           }
         }
         item.tts_status = 'ready';
+        // Refresh the allowance, and say so once it is running low.
+        loadState().then(() => { if (voiceShare() >= 0.8) showToast(Math.round(voiceShare() * 100) + '% of this month’s read-aloud allowance is used.'); }).catch(() => {});
       }
       btn.textContent = 'Loading audio…';
       const res = await fetch('/api/items/' + item.id + '/audio', { headers: { authorization: 'Bearer ' + token } });
@@ -487,6 +497,23 @@ $('player-close').addEventListener('click', () => {
 });
 
 // ---- loading ---------------------------------------------------------------
+let voiceUsage = null;
+const voiceShare = () => (voiceUsage && voiceUsage.limit > 0 ? voiceUsage.chars / voiceUsage.limit : 0);
+// Monthly read-aloud use against the cap the tracker enforces (set below Google's free amount).
+function renderVoice() {
+  const u = voiceUsage;
+  $('voice-panel').hidden = !u;
+  if (!u) return;
+  const pct = Math.min(100, Math.round(voiceShare() * 100));
+  const left = Math.max(0, u.limit - u.chars);
+  const monthName = new Date(u.month + '-15T00:00:00Z').toLocaleString(undefined, { month: 'long', timeZone: 'UTC' });
+  $('voice-bar').style.width = pct + '%';
+  $('voice-meter').classList.toggle('high', pct >= 80);
+  $('voice-meter').setAttribute('aria-label', pct + '% of this month’s read-aloud allowance used');
+  $('voice-text').textContent = pct + '% used in ' + monthName + ': ' + u.chars.toLocaleString() + ' of ' + u.limit.toLocaleString() +
+    ' characters. About ' + Math.floor(left / 15000) + ' typical posts left. Resets on the 1st; the tracker stops at this limit, which is inside Google’s free 1,000,000.';
+}
+
 let substackSession = { available: false, set: false };
 function renderSubstack() {
   const s = substackSession;
@@ -502,7 +529,9 @@ async function loadState() {
   counts = state.counts;
   sources = state.sources;
   substackSession = state.substack_session || substackSession;
+  voiceUsage = state.voice_usage || voiceUsage;
   renderSubstack();
+  renderVoice();
   renderChrome();
 }
 

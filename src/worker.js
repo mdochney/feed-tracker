@@ -56,9 +56,10 @@ async function api(request, env, ctx) {
   const batch = Number(env.POLL_BATCH) || 20;
 
   if (path === '/api/state' && method === 'GET') {
-    const [state, substack] = await Promise.all([
-      getState(db, { backlog: url.searchParams.get('backlog') === '1' }), substackSessionState(env.AUDIO ?? null)]);
-    return json({ ...state, substack_session: substack });
+    const [state, substack, voice] = await Promise.all([
+      getState(db, { backlog: url.searchParams.get('backlog') === '1' }), substackSessionState(env.AUDIO ?? null),
+      ttsUsage(db, ttsConfig(env))]);
+    return json({ ...state, substack_session: substack, voice_usage: voice });
   }
 
   // The Substack sign-in used to read paid posts in full. Stored in KV; never returned.

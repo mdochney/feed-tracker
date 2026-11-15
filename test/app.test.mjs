@@ -521,6 +521,7 @@ test('a text post is read aloud once, in pieces, and counted against the monthly
     assert.equal(synth(), synthCalls, 'a stored part is never paid for twice');
     const used = (await db.prepare('SELECT chars FROM tts_usage').first()).chars;
     assert.equal(used, job.chars - (job.parts - 1), 'every character sent is counted (joins between pieces are not sent)');
+    assert.deepEqual((await (await call('GET', '/api/state')).json()).voice_usage, { month: new Date().toISOString().slice(0, 7), chars: used, limit: 15000 });
 
     const audio = await call('GET', '/api/items/1/audio');
     assert.equal(audio.headers.get('content-type'), 'audio/mpeg');
