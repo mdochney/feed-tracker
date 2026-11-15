@@ -48,6 +48,14 @@ npx wrangler secret put YOUTUBE_API_KEY  # YouTube Data API v3 key (Google Cloud
 npm run deploy
 ```
 
+After that first deploy, the repository is connected to Cloudflare (Workers Builds), so
+every push to `main` applies new migrations and deploys by itself. The deploy command set
+in the Cloudflare dashboard is:
+
+```sh
+npx wrangler d1 migrations apply feed-tracker --remote && npx wrangler deploy
+```
+
 The cron trigger runs every 10 minutes and checks the sources that have waited longest.
 A run stops at `FETCH_BUDGET` outbound requests (45 by default, under the free plan's
 limit of 50), which is about 40 sources, so roughly 340 sources are each checked every
