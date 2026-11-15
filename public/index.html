@@ -103,6 +103,9 @@ select, input[type="search"] {
   padding: 6px 8px; min-width: 0;
 }
 select { max-width: 220px; }
+#length { max-width: 170px; }
+/* Long podcast descriptions are cut to three lines; the full text is on the item's own page. */
+.sum { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
 input[type="search"] { flex: 1 1 140px; max-width: 260px; }
 .showing { color: var(--muted); font-size: 13px; margin-left: auto; font-variant-numeric: tabular-nums; }
 
@@ -232,6 +235,15 @@ body.playing .toast { bottom: 96px; }
           <button type="button" data-type="text" aria-pressed="false">Text</button>
         </div>
         <select id="source" aria-label="Source"></select>
+        <select id="length" aria-label="Minimum length">
+          <option value="0">Any length</option>
+          <option value="5">5 min or longer</option>
+          <option value="10">10 min or longer</option>
+          <option value="20">20 min or longer</option>
+          <option value="30">30 min or longer</option>
+          <option value="45">45 min or longer</option>
+          <option value="60">1 hour or longer</option>
+        </select>
         <input type="search" id="search" placeholder="Search titles" aria-label="Search titles">
         <span class="showing" id="showing"></span>
       </div>
@@ -293,6 +305,9 @@ try { token = localStorage.getItem(TOKEN_KEY) || ''; } catch {}
 let view = 'new';
 let typeFilter = 'all';
 let sourceFilter = '';
+const LENGTH_KEY = 'feed-tracker-min-minutes';
+let minMinutes = '0';
+try { minMinutes = localStorage.getItem(LENGTH_KEY) || '0'; } catch {}
 let query = '';
 let items = [];
 let total = 0;
@@ -419,6 +434,7 @@ async function loadItems({ append = false } = {}) {
   const seq = ++loadSeq;
   const p = new URLSearchParams({ view, type: typeFilter, limit: String(PAGE), offset: String(append ? items.length : 0) });
   if (sourceFilter) p.set('source', sourceFilter);
+  if (minMinutes !== '0') p.set('min_minutes', minMinutes);
   if (query.trim()) p.set('q', query.trim());
   const data = await api('/items?' + p);
   if (seq !== loadSeq) return; // a newer request superseded this one
@@ -594,7 +610,7 @@ function markSelection() {
 function renderItems() {
   const list = $('list');
   list.textContent = '';
-  const filtered = typeFilter !== 'all' || sourceFilter || query.trim();
+  const filtered = typeFilter !== 'all' || sourceFilter || query.trim() || minMinutes !== '0';
   $('showing').textContent = items.length === total ? total + ' items' : 'Showing ' + items.length + ' of ' + total;
   if (view === 'backlog') {
     const note = el('p', 'hint', 'Older items that were skipped automatically when each source was first added. ');
@@ -744,6 +760,14 @@ document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('clic
   loadItems().catch(report);
 }));
 $('source').addEventListener('change', (e) => { sourceFilter = e.target.value; loadItems().catch(report); });
+$('length').value = minMinutes;
+if ($('length').value !== minMinutes) minMinutes = $('length').value = '0';
+$('length').title = 'Hides audio and video known to be shorter. Text posts and items with no recorded length stay.';
+$('length').addEventListener('change', (e) => {
+  minMinutes = e.target.value;
+  try { localStorage.setItem(LENGTH_KEY, minMinutes); } catch {}
+  loadItems().catch(report);
+});
 let searchTimer = null;
 $('search').addEventListener('input', (e) => {
   query = e.target.value;

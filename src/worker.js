@@ -57,7 +57,8 @@ async function api(request, env, ctx) {
     const p = url.searchParams;
     return json(await listItems(db, {
       view: p.get('view') ?? 'new', type: p.get('type') ?? 'all', source: p.get('source'),
-      q: (p.get('q') ?? '').slice(0, 100), limit: p.get('limit') ?? 100, offset: p.get('offset') ?? 0,
+      q: (p.get('q') ?? '').slice(0, 100), minMinutes: p.get('min_minutes') ?? 0,
+      limit: p.get('limit') ?? 100, offset: p.get('offset') ?? 0,
     }));
   }
 

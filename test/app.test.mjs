@@ -379,3 +379,26 @@ test('API: saving a private feed applies it, hides the address, and rejects bad 
   assert.equal((await call('PATCH', `/api/sources/${source.id}`, { private_feed_url: '' })).status, 200);
   assert.equal((await getState(db)).sources[0].has_private_feed, 0);
 });
+
+test('minimum-length filter hides known-short items and keeps text and unknown lengths', async () => {
+  const { db, source } = await seeded();
+  await storePoll(db, source, {
+    status: 'ok',
+    items: [
+      item('clip', '2026-11-14T10:00:00.000Z', { media_type: 'video', duration_sec: 240 }),
+      item('show', '2026-11-14T09:00:00.000Z', { media_type: 'video', duration_sec: 3600 }),
+      item('exactly-ten', '2026-11-14T08:00:00.000Z', { media_type: 'audio', duration_sec: 600 }),
+      item('unknown', '2026-11-14T07:00:00.000Z', { media_type: 'audio', duration_sec: null }),
+      item('essay', '2026-11-14T06:00:00.000Z'),
+    ],
+  }, '2026-11-14T12:00:00Z');
+  db.sqlite.prepare("UPDATE items SET duration_sec = 0 WHERE guid = 'unknown'").run();
+  const guids = async (opts) => (await listItems(db, opts)).items.map((i) => db.sqlite.prepare('SELECT guid FROM items WHERE id = ?').get(i.id).guid);
+  assert.deepEqual(await guids({ view: 'new' }), ['clip', 'show', 'exactly-ten', 'unknown', 'essay']);
+  assert.deepEqual(await guids({ view: 'new', minMinutes: 10 }), ['show', 'exactly-ten', 'unknown', 'essay']);
+  assert.deepEqual(await guids({ view: 'new', minMinutes: '30' }), ['show', 'unknown', 'essay']);
+  assert.equal((await listItems(db, { view: 'new', minMinutes: 30 })).total, 3);
+
+  const res = await worker.fetch(new Request('https://app.example/api/items?view=new&min_minutes=30&type=av', { headers: { authorization: 'Bearer s' } }), { DB: db, APP_TOKEN: 's' }, {});
+  assert.deepEqual((await res.json()).items.map((i) => i.title), ['Title show', 'Title unknown']);
+});

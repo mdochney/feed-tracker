@@ -243,13 +243,16 @@ const VIEW_SQL = {
   backlog: { where: "i.status = 'dismissed' AND i.auto_dismissed = 1", order: 'i.published_at DESC, i.id DESC' },
 };
 
-export async function listItems(db, { view = 'new', type = 'all', source = null, q = '', limit = 100, offset = 0 } = {}) {
+export async function listItems(db, { view = 'new', type = 'all', source = null, q = '', minMinutes = 0, limit = 100, offset = 0 } = {}) {
   const v = VIEW_SQL[view] ?? VIEW_SQL.new;
   const where = [v.where];
   const args = [];
   if (type === 'text') where.push("i.media_type = 'text'");
   if (type === 'av') where.push("i.media_type <> 'text'");
   if (source) { where.push('i.source_id = ?'); args.push(Number(source)); }
+  // Hides only items known to be shorter. Text posts and items with no recorded length stay.
+  const minSec = Math.round((Number(minMinutes) || 0) * 60);
+  if (minSec > 0) { where.push('(i.duration_sec IS NULL OR i.duration_sec = 0 OR i.duration_sec >= ?)'); args.push(minSec); }
   if (q) { where.push("i.title LIKE ? ESCAPE '\\'"); args.push('%' + q.replace(/[\\%_]/g, '\\$&') + '%'); }
   const cap = Math.max(1, Math.min(200, Number(limit) || 100));
   const sql = `
