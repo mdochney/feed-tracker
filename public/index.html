@@ -239,7 +239,8 @@ body.playing .toast { bottom: 96px; }
           <button type="button" data-type="av" aria-pressed="false">Audio / video</button>
           <button type="button" data-type="text" aria-pressed="false">Text</button>
         </div>
-        <select id="source" aria-label="Source"></select>
+        <input type="search" id="source" list="source-list" placeholder="All sources" aria-label="Source: type to find one, clear to show all" autocomplete="off">
+        <datalist id="source-list"></datalist>
         <select id="length" aria-label="Minimum length">
           <option value="0">Any length</option>
           <option value="5">5 min or longer</option>
@@ -598,7 +599,7 @@ const sourceNoun = (item) => (item.platform === 'youtube' ? 'channel' : item.pla
 // Show only this item's source, or everything again if it is already the filter.
 function filterToSource(item) {
   sourceFilter = sourceFilter === String(item.source_id) ? '' : String(item.source_id);
-  $('source').value = sourceFilter;
+  $('source').value = sourceFilter ? item.source_name : '';
   window.scrollTo(0, 0);
   loadItems().catch(report);
 }
@@ -657,13 +658,13 @@ function renderChrome() {
   $('keys').hidden = !isItems;
   $('sources-view').hidden = isItems;
 
-  const select = $('source');
-  const keep = sourceFilter;
-  select.textContent = '';
-  select.append(new Option('All sources', ''));
-  for (const s of sources) if (s.active) select.append(new Option(s.name, String(s.id)));
-  select.value = keep;
-  if (select.value !== keep) sourceFilter = '';
+  // The source filter is a text box with suggestions, so a source can be found by typing.
+  const list = $('source-list');
+  list.textContent = '';
+  for (const s of sources) if (s.active) list.append(new Option(s.name));
+  const chosen = sources.find((s) => s.active && String(s.id) === sourceFilter);
+  if (!chosen) sourceFilter = '';
+  if (document.activeElement !== $('source')) $('source').value = chosen ? chosen.name : '';
 
   const latest = sources.map((s) => s.last_polled_at).filter(Boolean).sort().at(-1);
   $('snapshot').textContent = latest ? 'Last checked ' + age(latest) : 'Not checked yet';
@@ -901,7 +902,23 @@ document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('clic
   document.querySelectorAll('.seg button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
   loadItems().catch(report);
 }));
-$('source').addEventListener('change', (e) => { sourceFilter = e.target.value; loadItems().catch(report); });
+// Typing narrows the suggestions; the filter applies once the text names a source, and
+// clearing the box shows every source again.
+function applySourceBox() {
+  const typed = $('source').value.trim().toLowerCase();
+  const match = typed ? sources.find((s) => s.active && s.name.toLowerCase() === typed) : null;
+  const next = match ? String(match.id) : typed ? sourceFilter : '';
+  if (next === sourceFilter) return;
+  sourceFilter = next;
+  loadItems().catch(report);
+}
+$('source').addEventListener('input', applySourceBox);
+$('source').addEventListener('change', () => {
+  applySourceBox();
+  // Text that names no source is put back to the current choice.
+  const chosen = sources.find((s) => String(s.id) === sourceFilter);
+  $('source').value = chosen ? chosen.name : '';
+});
 $('length').value = minMinutes;
 if ($('length').value !== minMinutes) minMinutes = $('length').value = '0';
 $('length').title = 'Hides items known to be shorter, using estimated listening time for text posts. Items with no recorded length stay.';
