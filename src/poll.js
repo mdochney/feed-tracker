@@ -17,7 +17,17 @@ export async function pollSource(source, { fetchImpl = fetch, privateFeeds = {},
   if (source.etag) headers['if-none-match'] = source.etag;
   if (source.last_modified) headers['if-modified-since'] = source.last_modified;
 
-  const res = await fetchImpl(url, { headers, redirect: 'follow', signal: AbortSignal.timeout(timeoutMs) });
+  // Redirects are followed by hand so that every hop goes through fetchImpl: each one counts
+  // against the platform's per-run request limit, and the caller keeps a budget of them.
+  let res;
+  let finalUrl = url;
+  for (let hop = 0; ; hop++) {
+    res = await fetchImpl(finalUrl, { headers, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
+    const location = res.status >= 300 && res.status < 400 && res.status !== 304 ? res.headers.get('location') : null;
+    if (!location) break;
+    if (hop >= 4) throw new Error('Too many redirects');
+    finalUrl = new URL(location, finalUrl).href;
+  }
   if (res.status === 304) {
     return { status: 'not_modified', items: [], etag: source.etag ?? null, last_modified: source.last_modified ?? null };
   }
@@ -31,5 +41,7 @@ export async function pollSource(source, { fetchImpl = fetch, privateFeeds = {},
     site_url: feed.site_url,
     etag: res.headers.get('etag'),
     last_modified: res.headers.get('last-modified'),
+    // Where the public feed really lives, so later polls can skip the redirect.
+    moved_to: finalUrl !== url && !privateFeeds[source.key] ? finalUrl : null,
   };
 }

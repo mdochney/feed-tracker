@@ -49,6 +49,8 @@ export async function storePoll(db, source, result, at = nowIso()) {
     `UPDATE sources SET last_polled_at = ?, last_status = 'ok', etag = ?, last_modified = ?,
             site_url = COALESCE(?, site_url) WHERE id = ?`)
     .bind(at, result.etag ?? null, result.last_modified ?? null, result.site_url ?? null, source.id));
+  // OR IGNORE: feed_url is unique, and two sources must not be merged by a shared redirect target.
+  if (result.moved_to) stmts.push(db.prepare('UPDATE OR IGNORE sources SET feed_url = ? WHERE id = ?').bind(result.moved_to, source.id));
   await db.batch(stmts);
   const after = await db.prepare('SELECT COUNT(*) AS n FROM items WHERE source_id = ?').bind(source.id).first();
   return { inserted: after.n - before.n };

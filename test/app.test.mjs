@@ -272,3 +272,24 @@ test('a run stays inside its request budget and leaves the rest for next time', 
   for (let i = 0; i < 6 && waiting() > 0; i++) await pollBatch(db, { limit: 100, fetchBudget: 12, fetchImpl });
   assert.equal(waiting(), 0);
 });
+
+test('redirects count against the budget and the feed’s real address is remembered', async () => {
+  const { db } = await seeded();
+  const xml = await fixture('substack.xml');
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push(url);
+    assert.equal(init.redirect, 'manual');
+    if (url === 'https://example.substack.com/feed') return new Response(null, { status: 301, headers: { location: 'https://www.example.com/feed' } });
+    return new Response(xml);
+  };
+  const [r] = await pollBatch(db, { fetchImpl, fetchBudget: 10 });
+  assert.equal(r.inserted, 2);
+  assert.deepEqual(calls.slice(0, 2), ['https://example.substack.com/feed', 'https://www.example.com/feed']);
+  assert.equal(db.sqlite.prepare('SELECT feed_url FROM sources').get().feed_url, 'https://www.example.com/feed');
+
+  // Next poll goes straight to the new address.
+  calls.length = 0;
+  await pollBatch(db, { fetchImpl, fetchBudget: 10 });
+  assert.equal(calls[0], 'https://www.example.com/feed');
+});
