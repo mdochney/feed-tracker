@@ -284,7 +284,7 @@ body.playing .toast { bottom: 96px; }
     </section>
 
     <p class="keys" id="keys">
-      Keys: <kbd>j</kbd> <kbd>k</kbd> move · <kbd>q</kbd> add to watch next · <kbd>x</kbd> dismiss · <kbd>p</kbd> pause source ·
+      Keys: <kbd>j</kbd> <kbd>k</kbd> move · <kbd>q</kbd> add to watch next · <kbd>x</kbd> dismiss · <kbd>p</kbd> pause source · <kbd>f</kbd> only this source ·
       <kbd>d</kbd> mark done · <kbd>o</kbd> open · <kbd>u</kbd> undo
     </p>
   </div>
@@ -552,6 +552,14 @@ async function setStatus(item, status, { record = true } = {}) {
   }
 }
 
+const sourceNoun = (item) => (item.platform === 'youtube' ? 'channel' : item.platform === 'podcast' ? 'show' : 'source');
+// Show only this item's source, or everything again if it is already the filter.
+function filterToSource(item) {
+  sourceFilter = sourceFilter === String(item.source_id) ? '' : String(item.source_id);
+  $('source').value = sourceFilter;
+  window.scrollTo(0, 0);
+  loadItems().catch(report);
+}
 const pauseLabel = (item) => (item.platform === 'youtube' ? 'Pause channel' : item.platform === 'podcast' ? 'Pause show' : 'Pause source');
 
 // Pause the source an item came from: its items leave New and it is no longer checked.
@@ -672,6 +680,9 @@ function rowFor(item, index) {
     const pause = button(pauseLabel(item), 'quiet', () => pauseSource(item));
     pause.title = 'Stop showing new items from ' + item.source_name;
     acts.append(pause);
+    const only = button(sourceFilter === String(item.source_id) ? 'Show all sources' : 'Only this ' + sourceNoun(item), 'quiet', () => filterToSource(item));
+    only.title = sourceFilter === String(item.source_id) ? 'Clear the source filter' : 'Show only new items from ' + item.source_name;
+    acts.append(only);
   } else if (view === 'queue') {
     acts.append(button('Done', 'primary', () => setStatus(item, 'done')));
     acts.append(button('Remove', '', () => setStatus(item, 'new')));
@@ -924,6 +935,7 @@ document.addEventListener('keydown', (e) => {
   else if (k === 'q' && view === 'new') setStatus(item, 'queued');
   else if (k === 'x' && view === 'new') setStatus(item, 'dismissed');
   else if (k === 'p' && view === 'new') pauseSource(item);
+  else if (k === 'f' && view === 'new') filterToSource(item);
   else if (k === 'd' && view === 'queue') setStatus(item, 'done');
   else if (k === 'o') { document.querySelector('.row.sel a.title')?.click(); }
   else return;
