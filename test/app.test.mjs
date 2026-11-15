@@ -476,7 +476,7 @@ test('a text post is read aloud once, in pieces, and counted against the monthly
     if (url === 'https://substack.com/api/v1/posts/by-id/77') {
       return Response.json({ post: { body_html: good ? body : preview } }, { headers: good ? { 'set-cookie': `substack.sid=${SID2}; Path=/; HttpOnly` } : {} });
     }
-    if (url === 'https://substack.com/api/v1/subscriptions') return good ? Response.json({}) : new Response('{}', { status: 401 });
+    if (url === 'https://substack.com/api/v1/user/profile/self') return good ? new Response('{}', { status: 400 }) : new Response('{}', { status: 401 });
     if (url.startsWith('https://texttospeech.googleapis.com/')) {
       assert.equal(init.headers['x-goog-api-key'], 'k');
       return Response.json({ audioContent: btoa('mp3:' + JSON.parse(init.body).input.text.length + ';') });

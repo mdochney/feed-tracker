@@ -111,6 +111,14 @@ async function substackFetch(kv, sid, path, fetchImpl) {
   return { res, renewed };
 }
 
+// Substack answers 401 or 403 to a request that is not signed in. Any other reply short of
+// a server error or rate limit got past that check, whatever it thought of the request.
+async function checkSignedIn(kv, sid, fetchImpl) {
+  const { res, renewed } = await substackFetch(kv, sid, '/api/v1/user/profile/self', fetchImpl);
+  const signedIn = res.status === 401 || res.status === 403 ? false : res.status < 500 && res.status !== 429 ? true : null;
+  return { signedIn, status: res.status, renewed };
+}
+
 async function setSidState(kv, ok) {
   await kv.put(SID_STATE_KEY, JSON.stringify({ ok, at: new Date().toISOString() }));
 }
@@ -118,8 +126,8 @@ async function setSidState(kv, ok) {
 export async function saveSubstackSession(kv, input, { fetchImpl = fetch } = {}) {
   if (!kv) throw new TtsError(503, 'Storage is not set up on this Worker');
   const sid = cleanSid(input);
-  const { res, renewed } = await substackFetch(kv, sid, '/api/v1/subscriptions', fetchImpl);
-  if (!res.ok) throw new RangeError(res.status === 401 || res.status === 403 ? 'Substack did not accept that cookie. It was not saved.' : `Substack could not be reached to check it (HTTP ${res.status}). It was not saved.`);
+  const { signedIn, status, renewed } = await checkSignedIn(kv, sid, fetchImpl);
+  if (signedIn !== true) throw new RangeError(signedIn === false ? 'Substack did not accept that cookie. It was not saved.' : `Substack could not be reached to check it (HTTP ${status}). It was not saved.`);
   if (!renewed) await kv.put(SID_KEY, sid); // a renewed cookie in the reply was already stored
   await setSidState(kv, true);
 }
@@ -160,8 +168,7 @@ export async function fetchArticle(item, { fetchImpl = fetch, kv = null } = {}) 
         const fullText = body ? articleText(body) : '';
         if (fullText && !isPartial(fullText, post)) { await setSidState(kv, true); return { text: fullText, partial: false, signedIn: true }; }
         // Still the preview: either the sign-in has lapsed or this account has no access.
-        const { res: check } = await substackFetch(kv, sid, '/api/v1/subscriptions', fetchImpl);
-        const signedIn = check.ok ? true : check.status === 401 || check.status === 403 ? false : null;
+        const { signedIn } = await checkSignedIn(kv, sid, fetchImpl);
         if (signedIn !== null) await setSidState(kv, signedIn);
         return { text: fullText.length > text.length ? fullText : text, partial: true, signedIn };
       }
