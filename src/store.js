@@ -23,30 +23,65 @@ const UPSERT_ITEM = `
     thumbnail_url = COALESCE(excluded.thumbnail_url, items.thumbnail_url),
     summary = excluded.summary`;
 
-// Write one poll result. One batch (a single D1 call) per source.
+// Write one poll result: one read and one batch per source.
+//
+// Only rows that are new or actually changed are written. D1's free plan allows 100,000 row
+// writes a day (each index counts as another row), and re-writing every item of every feed on
+// every poll would use that up within hours.
 export async function storePoll(db, source, result, at = nowIso()) {
   if (result.status === 'not_modified') {
     await db.prepare('UPDATE sources SET last_polled_at = ?, last_status = ? WHERE id = ?')
       .bind(at, 'not_modified', source.id).run();
-    return { inserted: 0 };
+    return { inserted: 0, updated: 0 };
   }
   const cutoff = new Date(Date.parse(at) - BACKFILL_DAYS * 86400000).toISOString();
   const items = [...result.items]
     .sort((a, b) => ((a.published_at ?? '') < (b.published_at ?? '') ? 1 : -1))
     .slice(0, MAX_ITEMS_PER_POLL);
 
-  const before = await db.prepare('SELECT COUNT(*) AS n FROM items WHERE source_id = ?').bind(source.id).first();
+  // Newest 400 is far more than any feed lists at once, and bounds the rows read per poll.
+  const { results: stored } = await db.prepare(
+    `SELECT id, guid, title, url, media_type, media_url, duration_sec, thumbnail_url, summary
+     FROM items WHERE source_id = ? ORDER BY id DESC LIMIT 400`).bind(source.id).all();
+  const byGuid = new Map(stored.map((r) => [r.guid, r]));
   // "First poll" means nothing stored yet, not "never attempted": a source whose first
   // attempts failed must still have its backlog skipped when it finally loads.
-  const firstPoll = before.n === 0;
-  const stmts = items.map((it) => {
-    const published = it.published_at ?? at;
-    const old = firstPoll && published < cutoff;
-    return db.prepare(UPSERT_ITEM).bind(
-      source.id, it.guid, it.title, it.url, published, it.media_type, it.media_url,
-      it.duration_sec, it.thumbnail_url, it.summary,
-      old ? 'dismissed' : 'new', old ? at : null, at, old ? 1 : 0);
-  });
+  const firstPoll = stored.length === 0;
+  // With a private feed, the full-episode audio merged in from it must not be replaced by
+  // the public feed's preview on the next poll.
+  const keepMedia = source.platform === 'substack' && !!source.private_feed_url;
+
+  const stmts = [];
+  let inserted = 0;
+  let updated = 0;
+  const seen = new Set();
+  for (const it of items) {
+    if (seen.has(it.guid)) continue; // a feed listing the same id twice
+    seen.add(it.guid);
+    const row = byGuid.get(it.guid);
+    if (!row) {
+      const published = it.published_at ?? at;
+      const old = firstPoll && published < cutoff;
+      stmts.push(db.prepare(UPSERT_ITEM).bind(
+        source.id, it.guid, it.title, it.url, published, it.media_type, it.media_url,
+        it.duration_sec, it.thumbnail_url, it.summary,
+        old ? 'dismissed' : 'new', old ? at : null, at, old ? 1 : 0));
+      inserted++;
+      continue;
+    }
+    const mediaType = keepMedia ? row.media_type : it.media_type;
+    const mediaUrl = keepMedia && row.media_url ? row.media_url : it.media_url;
+    const duration = row.duration_sec || it.duration_sec || row.duration_sec;
+    const thumbnail = row.thumbnail_url ?? it.thumbnail_url;
+    const same = row.title === it.title && (row.url ?? null) === (it.url ?? null) && row.media_type === mediaType &&
+      (row.media_url ?? null) === (mediaUrl ?? null) && (row.duration_sec ?? null) === (duration ?? null) &&
+      (row.thumbnail_url ?? null) === (thumbnail ?? null) && (row.summary ?? null) === (it.summary ?? null);
+    if (same) continue;
+    stmts.push(db.prepare(
+      `UPDATE items SET title = ?, url = ?, media_type = ?, media_url = ?, duration_sec = ?, thumbnail_url = ?, summary = ?
+       WHERE id = ?`).bind(it.title, it.url, mediaType, mediaUrl, duration ?? null, thumbnail ?? null, it.summary, row.id));
+    updated++;
+  }
   stmts.push(db.prepare(
     `UPDATE sources SET last_polled_at = ?, last_status = 'ok', etag = ?, last_modified = ?,
             site_url = COALESCE(?, site_url) WHERE id = ?`)
@@ -54,8 +89,7 @@ export async function storePoll(db, source, result, at = nowIso()) {
   // OR IGNORE: feed_url is unique, and two sources must not be merged by a shared redirect target.
   if (result.moved_to) stmts.push(db.prepare('UPDATE OR IGNORE sources SET feed_url = ? WHERE id = ?').bind(result.moved_to, source.id));
   await db.batch(stmts);
-  const after = await db.prepare('SELECT COUNT(*) AS n FROM items WHERE source_id = ?').bind(source.id).first();
-  return { inserted: after.n - before.n };
+  return { inserted, updated };
 }
 
 // ---- Substack episode details -------------------------------------------------
@@ -238,7 +272,8 @@ export async function fillYoutubeDurations(db, { youtubeApiKey, fetchImpl = fetc
 const VIEW_SQL = {
   new: { where: "i.status = 'new' AND s.active = 1", order: 'i.published_at DESC, i.id DESC' },
   queue: { where: "i.status = 'queued'", order: 'i.queue_position ASC, i.id ASC' },
-  cleared: { where: "i.status IN ('dismissed', 'done') AND i.auto_dismissed = 0", order: 'i.status_changed_at DESC, i.id DESC' },
+  // The hint keeps this on the small partial index instead of walking every dismissed row.
+  cleared: { hint: 'INDEXED BY items_cleared', where: "i.auto_dismissed = 0 AND i.status IN ('dismissed', 'done')", order: 'i.status_changed_at DESC, i.id DESC' },
   // Older items skipped automatically when their source was first checked.
   backlog: { where: "i.status = 'dismissed' AND i.auto_dismissed = 1", order: 'i.published_at DESC, i.id DESC' },
 };
@@ -259,30 +294,38 @@ export async function listItems(db, { view = 'new', type = 'all', source = null,
     SELECT i.id, i.source_id, s.name AS source_name, s.platform, i.title, i.url, i.published_at,
            i.media_type, i.media_url, i.duration_sec, i.thumbnail_url, i.summary, i.status,
            i.status_changed_at, i.tts_status
-    FROM items i JOIN sources s ON s.id = i.source_id
+    FROM items i ${v.hint ?? ''} JOIN sources s ON s.id = i.source_id
     WHERE ${where.join(' AND ')}
     ORDER BY ${v.order}
     LIMIT ? OFFSET ?`;
   const { results } = await db.prepare(sql).bind(...args, cap + 1, Math.max(0, Number(offset) || 0)).all();
   const total = await db.prepare(
-    `SELECT COUNT(*) AS n FROM items i JOIN sources s ON s.id = i.source_id WHERE ${where.join(' AND ')}`)
+    `SELECT COUNT(*) AS n FROM items i ${v.hint ?? ''} JOIN sources s ON s.id = i.source_id WHERE ${where.join(' AND ')}`)
     .bind(...args).first();
   return { items: results.slice(0, cap), more: results.length > cap, total: total.n };
 }
 
-export async function getState(db) {
-  const counts = await db.prepare(`
-    SELECT COALESCE(SUM(i.status = 'new' AND s.active = 1), 0) AS new,
-           COALESCE(SUM(i.status = 'queued'), 0) AS queue,
-           COALESCE(SUM(i.status IN ('dismissed', 'done') AND i.auto_dismissed = 0), 0) AS cleared,
-           COALESCE(SUM(i.status = 'dismissed' AND i.auto_dismissed = 1), 0) AS backlog
-    FROM items i JOIN sources s ON s.id = i.source_id`).first();
-  const { results: sources } = await db.prepare(`
-    SELECT s.id, s.key, s.platform, s.name, s.feed_url, s.site_url, s.active, s.last_polled_at, s.last_status,
-           (s.private_feed_url IS NOT NULL AND s.private_feed_url <> '') AS has_private_feed,
-           (SELECT COUNT(*) FROM items i WHERE i.source_id = s.id AND i.status = 'new') AS new_count
-    FROM sources s ORDER BY s.name COLLATE NOCASE`).all();
-  return { counts, sources };
+// Counts and the source list for the page chrome. Each count reads only the rows it counts
+// (D1's free plan caps rows read per day), so the large skipped backlog is counted only
+// when asked for.
+export async function getState(db, { backlog = true } = {}) {
+  const stmts = [
+    db.prepare("SELECT COUNT(*) AS n FROM items i JOIN sources s ON s.id = i.source_id WHERE i.status = 'new' AND s.active = 1"),
+    db.prepare("SELECT COUNT(*) AS n FROM items WHERE status = 'queued'"),
+    db.prepare("SELECT COUNT(*) AS n FROM items INDEXED BY items_cleared WHERE auto_dismissed = 0 AND status IN ('dismissed', 'done')"),
+    db.prepare("SELECT source_id, COUNT(*) AS n FROM items WHERE status = 'new' GROUP BY source_id"),
+    db.prepare(`
+      SELECT s.id, s.key, s.platform, s.name, s.feed_url, s.site_url, s.active, s.last_polled_at, s.last_status,
+             (s.private_feed_url IS NOT NULL AND s.private_feed_url <> '') AS has_private_feed
+      FROM sources s ORDER BY s.name COLLATE NOCASE`),
+  ];
+  if (backlog) stmts.push(db.prepare("SELECT COUNT(*) AS n FROM items WHERE status = 'dismissed' AND auto_dismissed = 1"));
+  const rows = await Promise.all(stmts.map((st) => st.all()));
+  const one = (i) => rows[i].results[0]?.n ?? 0;
+  const newBySource = new Map(rows[3].results.map((r) => [r.source_id, r.n]));
+  const counts = { new: one(0), queue: one(1), cleared: one(2) };
+  if (backlog) counts.backlog = one(5);
+  return { counts, sources: rows[4].results.map((s) => ({ ...s, new_count: newBySource.get(s.id) ?? 0 })) };
 }
 
 const STATUSES = new Set(['new', 'queued', 'dismissed', 'done']);

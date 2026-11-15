@@ -423,7 +423,7 @@ $('player-close').addEventListener('click', () => {
 
 // ---- loading ---------------------------------------------------------------
 async function loadState() {
-  const state = await api('/state');
+  const state = await api('/state' + (view === 'cleared' || view === 'backlog' ? '?backlog=1' : ''));
   counts = state.counts;
   sources = state.sources;
   renderChrome();
@@ -751,6 +751,8 @@ function setView(v) {
   items = []; total = 0; more = false; sel = 0;
   renderChrome();
   if (ITEM_VIEWS.includes(view)) { renderItems(); loadItems().catch(report); }
+  // The skipped-backlog count is only fetched for the views that show it.
+  if (view === 'cleared' || view === 'backlog') loadState().then(renderItems).catch(report);
 }
 window.addEventListener('hashchange', () => setView(location.hash.slice(1)));
 

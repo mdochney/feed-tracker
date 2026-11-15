@@ -51,7 +51,7 @@ async function api(request, env, ctx) {
   const db = env.DB;
   const batch = Number(env.POLL_BATCH) || 20;
 
-  if (path === '/api/state' && method === 'GET') return json(await getState(db));
+  if (path === '/api/state' && method === 'GET') return json(await getState(db, { backlog: url.searchParams.get('backlog') === '1' }));
 
   if (path === '/api/items' && method === 'GET') {
     const p = url.searchParams;

@@ -102,7 +102,8 @@ test('API: auth, listing, status changes, queue order, source toggles', async ()
   assert.equal((await call(env, 'GET', '/api/state', null, 'wrong')).status, 401);
 
   const state = await (await call(env, 'GET', '/api/state')).json();
-  assert.deepEqual(state.counts, { new: 3, queue: 0, cleared: 0, backlog: 0 });
+  assert.deepEqual(state.counts, { new: 3, queue: 0, cleared: 0 }, 'the backlog is only counted on request');
+  assert.equal((await (await call(env, 'GET', '/api/state?backlog=1')).json()).counts.backlog, 0);
   assert.equal(state.sources[0].new_count, 3);
 
   const all = await (await call(env, 'GET', '/api/items?view=new')).json();
@@ -401,4 +402,38 @@ test('minimum-length filter hides known-short items and keeps text and unknown l
 
   const res = await worker.fetch(new Request('https://app.example/api/items?view=new&min_minutes=30&type=av', { headers: { authorization: 'Bearer s' } }), { DB: db, APP_TOKEN: 's' }, {});
   assert.deepEqual((await res.json()).items.map((i) => i.title), ['Title show', 'Title unknown']);
+});
+
+test('polling an unchanged feed writes no item rows, and a private feed’s audio survives public polls', async () => {
+  const { db, source } = await seeded();
+  const at = '2026-11-14T12:00:00Z';
+  const feed = () => ({ status: 'ok', items: [
+    item('a', '2026-11-13T10:00:00.000Z', { media_type: 'audio', media_url: 'https://cdn.example/preview.mp3', summary: 'S' }),
+    item('b', '2026-11-12T10:00:00.000Z'),
+  ] });
+  assert.deepEqual(await storePoll(db, source, feed(), at), { inserted: 2, updated: 0 });
+
+  // Count statements sent in the batch: only the source's own bookkeeping row.
+  const realBatch = db.batch;
+  let batchSizes = [];
+  db.batch = (stmts) => { batchSizes.push(stmts.length); return realBatch(stmts); };
+  const row = () => db.sqlite.prepare('SELECT * FROM sources').get();
+  assert.deepEqual(await storePoll(db, row(), feed(), '2026-11-14T13:00:00Z'), { inserted: 0, updated: 0 });
+  assert.deepEqual(batchSizes, [1]);
+
+  // Details filled in later (duration, art) are not undone by a feed that lacks them.
+  db.sqlite.prepare("UPDATE items SET duration_sec = 900, thumbnail_url = 'https://cdn.example/art.jpg' WHERE guid = 'a'").run();
+  batchSizes = [];
+  assert.deepEqual(await storePoll(db, row(), feed(), '2026-11-14T14:00:00Z'), { inserted: 0, updated: 0 });
+  assert.deepEqual(batchSizes, [1]);
+
+  // A real change is written, once.
+  const changed = feed(); changed.items[1].title = 'B, retitled';
+  assert.deepEqual(await storePoll(db, row(), changed, '2026-11-14T15:00:00Z'), { inserted: 0, updated: 1 });
+
+  // With a private feed saved, the merged-in full audio is kept when the public feed is polled.
+  db.sqlite.prepare("UPDATE sources SET private_feed_url = 'https://api.substack.com/feed/podcast/1/private/x.rss'").run();
+  db.sqlite.prepare("UPDATE items SET media_url = 'https://cdn.example/full.mp3' WHERE guid = 'a'").run();
+  assert.deepEqual(await storePoll(db, row(), changed, '2026-11-14T16:00:00Z'), { inserted: 0, updated: 0 });
+  assert.equal(db.sqlite.prepare("SELECT media_url FROM items WHERE guid = 'a'").get().media_url, 'https://cdn.example/full.mp3');
 });
