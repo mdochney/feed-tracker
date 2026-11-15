@@ -293,3 +293,19 @@ test('redirects count against the budget and the feed’s real address is rememb
   await pollBatch(db, { fetchImpl, fetchBudget: 10 });
   assert.equal(calls[0], 'https://www.example.com/feed');
 });
+
+test('a source whose first attempts failed still has its backlog skipped when it loads', async () => {
+  const { db } = await seeded();
+  const [bad] = await pollBatch(db, { fetchImpl: async () => new Response('no', { status: 500 }) });
+  assert.equal(bad.ok, false);
+  const source = db.sqlite.prepare('SELECT * FROM sources').get();
+  assert.ok(source.last_polled_at, 'the failed attempt is recorded');
+
+  await storePoll(db, source, {
+    status: 'ok',
+    items: [item('fresh', '2026-11-13T10:00:00.000Z'), item('stale', '2026-10-01T10:00:00.000Z')],
+  }, '2026-11-14T12:00:00Z');
+  const rows = Object.fromEntries(db.sqlite.prepare('SELECT guid, status, auto_dismissed FROM items').all().map((r) => [r.guid, r]));
+  assert.equal(rows.fresh.status, 'new');
+  assert.deepEqual([rows.stale.status, rows.stale.auto_dismissed], ['dismissed', 1]);
+});

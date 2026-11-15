@@ -30,13 +30,15 @@ export async function storePoll(db, source, result, at = nowIso()) {
       .bind(at, 'not_modified', source.id).run();
     return { inserted: 0 };
   }
-  const firstPoll = !source.last_polled_at;
   const cutoff = new Date(Date.parse(at) - BACKFILL_DAYS * 86400000).toISOString();
   const items = [...result.items]
     .sort((a, b) => ((a.published_at ?? '') < (b.published_at ?? '') ? 1 : -1))
     .slice(0, MAX_ITEMS_PER_POLL);
 
   const before = await db.prepare('SELECT COUNT(*) AS n FROM items WHERE source_id = ?').bind(source.id).first();
+  // "First poll" means nothing stored yet, not "never attempted": a source whose first
+  // attempts failed must still have its backlog skipped when it finally loads.
+  const firstPoll = before.n === 0;
   const stmts = items.map((it) => {
     const published = it.published_at ?? at;
     const old = firstPoll && published < cutoff;
