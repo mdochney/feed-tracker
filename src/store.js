@@ -231,15 +231,16 @@ export async function backfillTextEstimates(db, opts = {}, max = 3) {
   const since = new Date(Date.now() - 30 * 86400000).toISOString();
   // Only untriaged and queued items, which keeps this on the status index.
   const { results } = await db.prepare(
-    `SELECT DISTINCT i.source_id FROM items i JOIN sources s ON s.id = i.source_id
+    `SELECT i.source_id FROM items i JOIN sources s ON s.id = i.source_id
      WHERE i.status IN ('new', 'queued') AND i.media_type = 'text' AND i.duration_sec IS NULL AND i.url IS NOT NULL
-       AND i.published_at >= ? AND s.platform = 'substack' AND s.active = 1 LIMIT ?`).bind(since, max).all();
+       AND i.published_at >= ? AND s.platform = 'substack' AND s.active = 1
+     GROUP BY i.source_id ORDER BY RANDOM() LIMIT ?`).bind(since, max).all();
   let done = 0;
   for (const { source_id: id } of results) {
     const source = await db.prepare('SELECT * FROM sources WHERE id = ?').bind(id).first();
+    // A failure leaves the posts waiting: the random order means one unreachable
+    // publication cannot hold up the others, and it is tried again on a later run.
     try { done += await estimateSubstackText(db, source, opts); } catch (err) {
-      // Mark them looked-at so one unreachable publication cannot block the rest forever.
-      await db.prepare("UPDATE items SET duration_sec = 0 WHERE source_id = ? AND media_type = 'text' AND duration_sec IS NULL AND status IN ('new', 'queued') AND published_at >= ?").bind(id, since).run();
       console.warn(`${source.key}: post lengths unavailable (${err?.message ?? err})`);
     }
   }
