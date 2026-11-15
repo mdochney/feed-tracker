@@ -167,6 +167,8 @@ kbd { font-family: var(--font-body); font-size: 12px; border: 1px solid var(--li
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-top: 16px; }
 .meter { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
 .meter span { display: block; height: 100%; width: 0; background: var(--accent, #1f6f5c); border-radius: 5px; }
+.voice-line { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12.5px; color: var(--muted, #667); }
+.voice-line .meter { flex: 0 0 120px; height: 6px; }
 .meter.high span { background: #c0392b; }
 .panel h2 { font-family: var(--font-display); font-size: 16px; margin: 0 0 8px; }
 .panel form { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -249,6 +251,11 @@ body.playing .toast { bottom: 96px; }
         </select>
         <input type="search" id="search" placeholder="Search titles" aria-label="Search titles">
         <span class="showing" id="showing"></span>
+      </div>
+      <div class="voice-line" id="voice-line" hidden>
+        <span>Read aloud</span>
+        <div class="meter" id="voice-line-meter" role="img"><span id="voice-line-bar"></span></div>
+        <span id="voice-line-text"></span>
       </div>
     </div>
 
@@ -503,6 +510,7 @@ const voiceShare = () => (voiceUsage && voiceUsage.limit > 0 ? voiceUsage.chars 
 function renderVoice() {
   const u = voiceUsage;
   $('voice-panel').hidden = !u;
+  $('voice-line').hidden = !u;
   if (!u) return;
   const pct = Math.min(100, Math.round(voiceShare() * 100));
   const left = Math.max(0, u.limit - u.chars);
@@ -510,6 +518,11 @@ function renderVoice() {
   $('voice-bar').style.width = pct + '%';
   $('voice-meter').classList.toggle('high', pct >= 80);
   $('voice-meter').setAttribute('aria-label', pct + '% of this month’s read-aloud allowance used');
+  $('voice-line-bar').style.width = pct + '%';
+  $('voice-line-meter').classList.toggle('high', pct >= 80);
+  $('voice-line-meter').setAttribute('aria-label', pct + '% used');
+  $('voice-line-text').textContent = pct + '% used this month · about ' + Math.floor(left / 15000) + ' posts left';
+  $('voice-line').title = u.chars.toLocaleString() + ' of ' + u.limit.toLocaleString() + ' characters used in ' + monthName + '. Resets on the 1st.';
   $('voice-text').textContent = pct + '% used in ' + monthName + ': ' + u.chars.toLocaleString() + ' of ' + u.limit.toLocaleString() +
     ' characters. About ' + Math.floor(left / 15000) + ' typical posts left. Resets on the 1st; the tracker stops at this limit, which is inside Google’s free 1,000,000.';
 }
