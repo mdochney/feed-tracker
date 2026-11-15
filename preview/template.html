@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feed Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: one dense reading column, a sticky control bar, rows grouped by day. */
+:root {
+  --bg: #f3f5f1;
+  --surface: #ffffff;
+  --ink: #18211d;
+  --muted: #5d6b64;
+  --line: #d9dfd8;
+  --accent: #1c6b58;
+  --accent-ink: #ffffff;
+  --accent-soft: #dcece6;
+  --av: #8a4b12;
+  --av-soft: #f6e6d2;
+  --warn: #9a3b2f;
+  --font-display: "Bricolage Grotesque", "IBM Plex Sans", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111614;
+    --surface: #19201d;
+    --ink: #e3e9e5;
+    --muted: #98a59e;
+    --line: #2b3531;
+    --accent: #63c3a8;
+    --accent-ink: #0c1512;
+    --accent-soft: #1f3a32;
+    --av: #e6ad6c;
+    --av-soft: #3a2b18;
+    --warn: #ee9486;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111614;
+  --surface: #19201d;
+  --ink: #e3e9e5;
+  --muted: #98a59e;
+  --line: #2b3531;
+  --accent: #63c3a8;
+  --accent-ink: #0c1512;
+  --accent-soft: #1f3a32;
+  --av: #e6ad6c;
+  --av-soft: #3a2b18;
+  --warn: #ee9486;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.45;
+}
+.wrap { max-width: 920px; margin: 0 auto; padding: 0 16px 96px; }
+header.top { padding: 22px 0 10px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; }
+h1 { font-family: var(--font-display); font-size: 26px; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+.snapshot { color: var(--muted); font-size: 13px; }
+.sync { font-size: 13px; color: var(--muted); margin-left: auto; }
+.sync.warn { color: var(--warn); }
+
+.bar {
+  position: sticky; top: 0; z-index: 5;
+  background: var(--bg);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.tab {
+  font: inherit; font-weight: 600; color: var(--muted);
+  background: none; border: 1px solid transparent; border-radius: 8px;
+  padding: 6px 12px; cursor: pointer; text-decoration: none;
+  display: inline-flex; gap: 8px; align-items: baseline;
+}
+.tab .n { font-variant-numeric: tabular-nums; font-weight: 500; font-size: 13px; }
+.tab[aria-current="page"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
+.tab:hover { color: var(--ink); }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.seg button {
+  font: inherit; font-size: 13px; color: var(--muted); background: none; border: 0;
+  padding: 6px 10px; cursor: pointer; border-right: 1px solid var(--line);
+}
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--ink); font-weight: 600; }
+select, input[type="search"] {
+  font: inherit; font-size: 13px; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 8px; min-width: 0;
+}
+select { max-width: 220px; }
+input[type="search"] { flex: 1 1 140px; max-width: 260px; }
+.showing { color: var(--muted); font-size: 13px; margin-left: auto; font-variant-numeric: tabular-nums; }
+
+.day {
+  font-family: var(--font-display); font-weight: 600; font-size: 14px;
+  color: var(--muted); margin: 22px 0 6px; display: flex; gap: 8px; align-items: baseline;
+}
+.day .n { font-family: var(--font-body); font-weight: 400; font-size: 12px; font-variant-numeric: tabular-nums; }
+.list { display: flex; flex-direction: column; gap: 6px; }
+.row {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; display: grid; grid-template-columns: 1fr auto; gap: 4px 14px; align-items: start;
+  scroll-margin-top: 130px;
+}
+.row.sel { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.src { font-weight: 600; color: var(--ink); }
+.pill { font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 1px 8px; background: var(--accent-soft); color: var(--accent); }
+.pill.av { background: var(--av-soft); color: var(--av); }
+.pill.state { background: none; border: 1px solid var(--line); color: var(--muted); }
+.title { font-weight: 600; font-size: 15.5px; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
+.title:hover { text-decoration: underline; }
+.sum { color: var(--muted); font-size: 13.5px; margin: 2px 0 0; max-width: 68ch; overflow-wrap: anywhere; }
+.extra { font-size: 12.5px; }
+.extra a { color: var(--accent); }
+.main { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.acts { display: flex; gap: 6px; align-items: center; }
+.btn {
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  border-radius: 8px; padding: 6px 12px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); white-space: nowrap;
+}
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn:hover { filter: brightness(0.96); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.empty { color: var(--muted); padding: 40px 0; text-align: left; }
+.more { margin: 16px 0; }
+.keys { color: var(--muted); font-size: 12.5px; margin-top: 28px; }
+kbd { font-family: var(--font-body); font-size: 12px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; background: var(--surface); color: var(--ink); }
+.toast {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+  background: var(--ink); color: var(--bg); border-radius: 10px; padding: 8px 10px 8px 14px;
+  display: none; gap: 12px; align-items: center; font-size: 13.5px; max-width: calc(100vw - 32px); z-index: 10;
+}
+.toast.on { display: flex; }
+.toast button { font: inherit; font-weight: 600; background: none; border: 1px solid currentColor; color: inherit; border-radius: 7px; padding: 3px 10px; cursor: pointer; }
+.toast span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 620px) {
+  .row { grid-template-columns: 1fr; }
+  .acts { justify-content: flex-start; margin-top: 4px; }
+  .btn { padding: 8px 14px; }
+  .keys { display: none; }
+  .sync { margin-left: 0; width: 100%; }
+  .showing { width: 100%; margin-left: 0; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Feed Tracker</h1>
+    <span class="snapshot" id="snapshot"></span>
+    <span class="sync" id="sync">Loading saved choices…</span>
+  </header>
+
+  <div class="bar">
+    <nav class="tabs" aria-label="Views">
+      <a class="tab" href="#new" data-view="new">New <span class="n" id="n-new">0</span></a>
+      <a class="tab" href="#queue" data-view="queue">Watch next <span class="n" id="n-queue">0</span></a>
+      <a class="tab" href="#cleared" data-view="cleared">Cleared <span class="n" id="n-cleared">0</span></a>
+    </nav>
+    <div class="filters">
+      <div class="seg" role="group" aria-label="Content type">
+        <button type="button" data-type="all" aria-pressed="true">All</button>
+        <button type="button" data-type="audio" aria-pressed="false">Audio / video</button>
+        <button type="button" data-type="text" aria-pressed="false">Text</button>
+      </div>
+      <select id="source" aria-label="Source"></select>
+      <input type="search" id="search" placeholder="Search titles" aria-label="Search titles">
+      <span class="showing" id="showing"></span>
+    </div>
+  </div>
+
+  <main id="list" aria-live="off"></main>
+
+  <p class="keys">
+    Keys: <kbd>j</kbd> <kbd>k</kbd> move · <kbd>q</kbd> add to watch next · <kbd>x</kbd> dismiss ·
+    <kbd>d</kbd> mark done · <kbd>o</kbd> open · <kbd>u</kbd> undo
+  </p>
+</div>
+
+<div class="toast" id="toast" role="status"><span id="toast-text"></span><button type="button" id="toast-undo">Undo</button></div>
+
+<script>
+const DATA = /*__DATA__*/null;
+
+const PAGE = 150;
+const VIEWS = ['new', 'queue', 'cleared'];
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+};
+
+const items = DATA.items;
+const byId = new Map(items.map((i) => [i.id, i]));
+const sources = DATA.sources;
+
+// ---- state -----------------------------------------------------------------
+let status = new Map();          // id -> { s: 'queued' | 'dismissed' | 'done', t: ISO }
+const inflight = new Map();      // id -> { s, t } | null, writes not yet confirmed
+const undo = [];
+let view = 'new';
+let typeFilter = 'all';
+let sourceFilter = '';
+let query = '';
+let sel = 0;
+let shown = PAGE;
+let visible = [];
+
+// ---- storage: shared store when available, this browser otherwise -----------
+let db = null;
+let mode = 'pending';            // 'pending' | 'db' | 'local'
+const chains = new Map();
+const LS_KEY = 'feed-tracker-status';
+
+function setSync(text, warn) {
+  const s = $('sync');
+  s.textContent = text;
+  s.classList.toggle('warn', !!warn);
+}
+
+function loadLocal() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+    return new Map(Object.entries(raw));
+  } catch { return new Map(); }
+}
+function saveLocal() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(Object.fromEntries(status))); } catch {}
+}
+
+function writeDb(id, value) {
+  const prev = chains.get(id) || Promise.resolve();
+  const next = prev.catch(() => {}).then(() => {
+    const ref = db.collection('status').doc(id);
+    return value ? ref.set(value) : ref.delete();
+  });
+  chains.set(id, next);
+  next.then(() => {
+    if (chains.get(id) === next) { chains.delete(id); inflight.delete(id); }
+  }, (e) => {
+    if (chains.get(id) === next) { chains.delete(id); inflight.delete(id); }
+    setSync('A change could not be saved (' + (e && e.code || 'error') + '). Reload to see what is stored.', true);
+  });
+}
+
+function persist(id, value) {
+  if (mode === 'local') { saveLocal(); return; }
+  inflight.set(id, value);
+  if (mode === 'db') writeDb(id, value);
+}
+
+async function waitForClaude(ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (window.claude && typeof window.claude.use === 'function') return window.claude;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return null;
+}
+
+async function initStore() {
+  const claude = await waitForClaude(4000);
+  let handle = null;
+  if (claude) { try { handle = await claude.use('db'); } catch { handle = null; } }
+  if (!handle) {
+    mode = 'local';
+    const local = loadLocal();
+    for (const [id, v] of inflight) { if (v) local.set(id, v); else local.delete(id); }
+    inflight.clear();
+    status = local;
+    saveLocal();
+    setSync('Choices are saved in this browser only.');
+    render();
+    return;
+  }
+  db = handle;
+  mode = 'db';
+  for (const [id, v] of inflight) writeDb(id, v);
+  let confirmed = false;
+  const timer = setTimeout(() => {
+    if (!confirmed) setSync('Saved choices can’t be reached yet. What you see may be out of date.', true);
+  }, 10000);
+  db.collection('status').onSnapshot((snap) => {
+    const next = new Map();
+    for (const d of snap.docs) {
+      const v = d.data();
+      if (v && typeof v.s === 'string') next.set(d.id, { s: v.s, t: v.t || '' });
+    }
+    for (const [id, v] of inflight) { if (v) next.set(id, v); else next.delete(id); }
+    status = next;
+    if (!snap.metadata.fromCache) {
+      confirmed = true;
+      clearTimeout(timer);
+      setSync('Choices sync across your devices.');
+    }
+    render();
+  }, (e) => {
+    clearTimeout(timer);
+    setSync('Saved choices are unavailable (' + (e && e.code || 'error') + '). Changes now will not be kept.', true);
+  });
+}
+
+// ---- actions ---------------------------------------------------------------
+function setStatus(id, s, { record = true } = {}) {
+  const prev = status.get(id) || null;
+  const value = s === 'new' ? null : { s, t: new Date().toISOString() };
+  if (value) status.set(id, value); else status.delete(id);
+  if (record) {
+    undo.push({ id, prev });
+    const labels = { queued: 'Added to watch next', dismissed: 'Dismissed', done: 'Marked done', new: 'Moved back to new' };
+    showToast(labels[s] + ': ' + (byId.get(id)?.t || ''));
+  }
+  persist(id, value);
+  render();
+}
+
+function undoLast() {
+  const last = undo.pop();
+  if (!last) return;
+  if (last.prev) status.set(last.id, last.prev); else status.delete(last.id);
+  persist(last.id, last.prev);
+  hideToast();
+  render();
+}
+
+let toastTimer = null;
+function showToast(text) {
+  $('toast-text').textContent = text;
+  $('toast').classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, 6000);
+}
+function hideToast() { $('toast').classList.remove('on'); }
+
+// ---- rendering -------------------------------------------------------------
+const viewOf = (id) => {
+  const s = status.get(id)?.s;
+  return s === 'queued' ? 'queue' : s ? 'cleared' : 'new';
+};
+
+function age(iso) {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 60) return mins + 'm ago';
+  if (mins < 60 * 36) return Math.round(mins / 60) + 'h ago';
+  return Math.round(mins / 1440) + 'd ago';
+}
+const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+const stampFmt = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+function dayLabel(iso) {
+  const d = new Date(iso);
+  const today = new Date();
+  const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((start(today) - start(d)) / 86400000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return dayFmt.format(d);
+}
+function duration(sec) {
+  if (!sec) return '';
+  const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+  return h ? h + 'h ' + m + 'm' : m + ' min';
+}
+const safeUrl = (u) => (typeof u === 'string' && /^https?:\/\//i.test(u) ? u : null);
+
+function button(label, cls, fn) {
+  const b = el('button', 'btn' + (cls ? ' ' + cls : ''), label);
+  b.type = 'button';
+  b.addEventListener('click', fn);
+  return b;
+}
+
+function rowFor(item, index) {
+  const row = el('article', 'row' + (index === sel ? ' sel' : ''));
+  row.dataset.index = index;
+  const main = el('div', 'main');
+  const meta = el('div', 'meta');
+  meta.append(el('span', 'src', sources[item.s].n));
+  meta.append(el('span', 'pill' + (item.m === 'text' ? '' : ' av'), item.m === 'text' ? 'Text' : 'Audio / video'));
+  if (item.d) meta.append(el('span', null, duration(item.d)));
+  const when = el('span', null, age(item.p));
+  when.title = stampFmt.format(new Date(item.p));
+  meta.append(when);
+  const st = status.get(item.id)?.s;
+  if (st === 'done') meta.append(el('span', 'pill state', 'Done'));
+  if (st === 'dismissed') meta.append(el('span', 'pill state', 'Dismissed'));
+  main.append(meta);
+
+  const href = safeUrl(item.u);
+  const title = el(href ? 'a' : 'span', 'title', item.t);
+  if (href) { title.href = href; title.target = '_blank'; title.rel = 'noopener noreferrer'; }
+  main.append(title);
+  if (item.x) main.append(el('p', 'sum', item.x));
+  const audio = safeUrl(item.a);
+  if (audio) {
+    const extra = el('div', 'extra');
+    const a = el('a', null, 'Open the audio file');
+    a.href = audio; a.target = '_blank'; a.rel = 'noopener noreferrer';
+    extra.append(a);
+    main.append(extra);
+  }
+  row.append(main);
+
+  const acts = el('div', 'acts');
+  if (view === 'new') {
+    acts.append(button('Watch next', 'primary', () => setStatus(item.id, 'queued')));
+    acts.append(button('Dismiss', '', () => setStatus(item.id, 'dismissed')));
+  } else if (view === 'queue') {
+    acts.append(button('Done', 'primary', () => setStatus(item.id, 'done')));
+    acts.append(button('Remove', '', () => setStatus(item.id, 'new')));
+  } else {
+    acts.append(button('Restore', '', () => setStatus(item.id, 'new')));
+  }
+  row.append(acts);
+  row.addEventListener('click', (e) => {
+    if (e.target.closest('button, a')) return;
+    sel = index; markSelection();
+  });
+  return row;
+}
+
+function markSelection() {
+  document.querySelectorAll('.row').forEach((r) => r.classList.toggle('sel', Number(r.dataset.index) === sel));
+}
+
+function render() {
+  const counts = { new: 0, queue: 0, cleared: 0 };
+  for (const i of items) counts[viewOf(i.id)]++;
+  for (const v of VIEWS) $('n-' + v).textContent = counts[v];
+  document.querySelectorAll('.tab').forEach((t) => {
+    if (t.dataset.view === view) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
+  });
+
+  const q = query.trim().toLowerCase();
+  visible = items.filter((i) =>
+    viewOf(i.id) === view &&
+    (typeFilter === 'all' || (typeFilter === 'text') === (i.m === 'text')) &&
+    (sourceFilter === '' || String(i.s) === sourceFilter) &&
+    (!q || i.t.toLowerCase().includes(q) || sources[i.s].n.toLowerCase().includes(q)));
+  if (view === 'queue') visible.sort((a, b) => (status.get(a.id).t < status.get(b.id).t ? -1 : 1));
+  if (view === 'cleared') visible.sort((a, b) => (status.get(a.id).t > status.get(b.id).t ? -1 : 1));
+  sel = Math.min(sel, Math.max(0, visible.length - 1));
+
+  const list = $('list');
+  list.textContent = '';
+  const total = counts[view];
+  $('showing').textContent = visible.length === total ? total + ' items' : visible.length + ' of ' + total + ' items';
+
+  if (!visible.length) {
+    const msg = total
+      ? 'Nothing matches these filters.'
+      : view === 'new' ? 'You are caught up. Nothing new in this snapshot.'
+      : view === 'queue' ? 'Nothing in watch next yet. Add items from New.'
+      : 'Nothing dismissed or finished yet.';
+    list.append(el('p', 'empty', msg));
+    return;
+  }
+
+  const slice = visible.slice(0, shown);
+  let group = null, lastDay = null;
+  slice.forEach((item, index) => {
+    if (view === 'new') {
+      const day = dayLabel(item.p);
+      if (day !== lastDay) {
+        lastDay = day;
+        const head = el('h2', 'day', day);
+        const n = visible.filter((v) => dayLabel(v.p) === day).length;
+        head.append(el('span', 'n', String(n)));
+        list.append(head);
+        group = el('div', 'list');
+        list.append(group);
+      }
+    } else if (!group) {
+      group = el('div', 'list');
+      group.style.marginTop = '14px';
+      list.append(group);
+    }
+    group.append(rowFor(item, index));
+  });
+  if (visible.length > shown) {
+    const more = el('div', 'more');
+    more.append(button('Show ' + Math.min(PAGE, visible.length - shown) + ' more', '', () => { shown += PAGE; render(); }));
+    list.append(more);
+  }
+}
+
+// ---- wiring ----------------------------------------------------------------
+function setView(v) {
+  view = VIEWS.includes(v) ? v : 'new';
+  sel = 0; shown = PAGE;
+  render();
+}
+window.addEventListener('hashchange', () => setView(location.hash.slice(1)));
+
+document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => {
+  typeFilter = b.dataset.type;
+  document.querySelectorAll('.seg button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  sel = 0; shown = PAGE; render();
+}));
+
+const sourceSel = $('source');
+sourceSel.append(new Option('All sources', ''));
+const withItems = new Set(items.map((i) => i.s));
+sources.map((s, idx) => ({ ...s, idx })).filter((s) => withItems.has(s.idx))
+  .sort((a, b) => a.n.localeCompare(b.n))
+  .forEach((s) => sourceSel.append(new Option(s.n, String(s.idx))));
+sourceSel.addEventListener('change', () => { sourceFilter = sourceSel.value; sel = 0; shown = PAGE; render(); });
+$('search').addEventListener('input', (e) => { query = e.target.value; sel = 0; shown = PAGE; render(); });
+$('toast-undo').addEventListener('click', undoLast);
+
+document.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.target.closest('input, select, textarea')) return;
+  const item = visible[sel];
+  const k = e.key.toLowerCase();
+  if (k === 'j' || k === 'k') {
+    sel = Math.max(0, Math.min(Math.min(visible.length, shown) - 1, sel + (k === 'j' ? 1 : -1)));
+    markSelection();
+    document.querySelector('.row.sel')?.scrollIntoView({ block: 'nearest' });
+  } else if (k === 'u') { undoLast(); }
+  else if (!item) { return; }
+  else if (k === 'q' && view === 'new') setStatus(item.id, 'queued');
+  else if (k === 'x' && view === 'new') setStatus(item.id, 'dismissed');
+  else if (k === 'd' && view === 'queue') setStatus(item.id, 'done');
+  else if (k === 'o') { document.querySelector('.row.sel a.title')?.click(); }
+  else return;
+  e.preventDefault();
+});
+
+$('snapshot').textContent =
+  sources.length + ' Substack feeds · snapshot from ' + stampFmt.format(new Date(DATA.generated)) + ' · does not refresh by itself';
+
+setView(location.hash.slice(1));
+initStore();
+</script>
+</body>
+</html>

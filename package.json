@@ -6,7 +6,8 @@
   "engines": { "node": ">=20.11" },
   "scripts": {
     "test": "node --test",
-    "check-feeds": "node scripts/check-feeds.mjs"
+    "check-feeds": "node scripts/check-feeds.mjs",
+    "build-preview": "node scripts/build-preview.mjs"
   },
   "dependencies": {
     "fast-xml-parser": "^4.5.0"

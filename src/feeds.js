@@ -44,6 +44,8 @@ function stripHtml(html, max = 500) {
   if (!s) return null;
   const plain = s
     .replace(/<[^>]*>/g, ' ')
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&#39;|&apos;|&rsquo;/g, "'")

@@ -42,6 +42,7 @@ test('Substack RSS feed: podcast episode and text post', async () => {
   // An image enclosure is a cover image, not media.
   assert.equal(essay.media_type, 'text');
   assert.equal(essay.media_url, null);
+  assert.equal(essay.summary, 'The author’s plain text post – no audio.');
   assert.equal(essay.thumbnail_url, 'https://substackcdn.com/image/essay.jpeg');
 });
 
