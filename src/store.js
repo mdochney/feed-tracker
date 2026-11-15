@@ -141,8 +141,22 @@ export async function pollAndStore(db, source, opts = {}) {
 
 // Poll the sources that have waited longest. `limit` keeps one invocation inside the
 // platform's subrequest budget (each source costs one fetch plus a few D1 calls).
-export async function pollBatch(db, { limit = 20, concurrency = 6, sourceId = null, ...opts } = {}) {
+//
+// `fetchBudget` caps outbound requests for the whole run. Cloudflare's free plan allows 50
+// per invocation and fails the run when it is exceeded, so polling stops taking new sources
+// while there is still room for the ones in flight (each may need a second request) and for
+// the duration lookup. Sources not reached are simply first in line next run.
+export async function pollBatch(db, { limit = 20, concurrency = 6, sourceId = null, fetchBudget = 45, ...opts } = {}) {
   opts.enrichBudget ??= { left: 5 };
+  const budget = { left: fetchBudget };
+  const rawFetch = opts.fetchImpl ?? fetch;
+  opts.fetchImpl = (url, init) => {
+    if (budget.left <= 0) throw new Error('Request budget for this run is used up');
+    budget.left--;
+    return rawFetch(url, init);
+  };
+  const reserve = opts.youtubeApiKey ? 1 : 0;
+  let inFlight = 0;
   const query = sourceId
     ? db.prepare('SELECT * FROM sources WHERE id = ?').bind(sourceId)
     : db.prepare('SELECT * FROM sources WHERE active = 1 ORDER BY last_polled_at IS NOT NULL, last_polled_at LIMIT ?').bind(limit);
@@ -150,9 +164,15 @@ export async function pollBatch(db, { limit = 20, concurrency = 6, sourceId = nu
   const out = [];
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(concurrency, sources.length) }, async () => {
-    while (next < sources.length) out.push(await pollAndStore(db, sources[next++], opts));
+    while (next < sources.length && budget.left - inFlight * 2 >= 2 + reserve) {
+      inFlight++;
+      // Episode details cost two more requests; skip them when the run is nearly out.
+      const room = budget.left - inFlight * 2 >= 4 + reserve;
+      try { out.push(await pollAndStore(db, sources[next++], room ? opts : { ...opts, enrichBudget: { left: 0 } })); }
+      finally { inFlight--; }
+    }
   }));
-  if (opts.youtubeApiKey) {
+  if (opts.youtubeApiKey && budget.left >= 1) {
     try { await fillYoutubeDurations(db, opts); } catch (err) { console.warn(`YouTube durations unavailable (${err?.message ?? err})`); }
   }
   return out;

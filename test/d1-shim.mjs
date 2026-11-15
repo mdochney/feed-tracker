@@ -9,10 +9,11 @@ const clean = (v) => (v === undefined ? null : typeof v === 'boolean' ? Number(v
 class Statement {
   constructor(sqlite, sql, args = []) { this.sqlite = sqlite; this.sql = sql; this.args = args; }
   bind(...args) { return new Statement(this.sqlite, this.sql, args.map(clean)); }
-  async run() {
+  runSync() {
     const r = this.sqlite.prepare(this.sql).run(...this.args);
     return { success: true, meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } };
   }
+  async run() { return this.runSync(); }
   async all() { return { success: true, results: this.sqlite.prepare(this.sql).all(...this.args).map((r) => ({ ...r })) }; }
   async first() { const r = this.sqlite.prepare(this.sql).get(...this.args); return r ? { ...r } : null; }
 }
@@ -31,8 +32,8 @@ export async function createDb() {
     async batch(stmts) {
       sqlite.exec('BEGIN');
       try {
-        const out = [];
-        for (const s of stmts) out.push(await s.run());
+        // Synchronous on purpose: a D1 batch is atomic, so concurrent batches must not interleave.
+        const out = stmts.map((s) => s.runSync());
         sqlite.exec('COMMIT');
         return out;
       } catch (err) { sqlite.exec('ROLLBACK'); throw err; }

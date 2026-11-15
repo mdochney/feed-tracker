@@ -12,12 +12,15 @@ database_id = "c7dc8537-7db3-4e67-b500-0b5cd79b0eb3"
 migrations_dir = "migrations"
 
 [triggers]
-# Every 10 minutes, polling the POLL_BATCH sources that have waited longest
-# (60 x 6 runs an hour covers about 360 sources hourly).
+# Every 10 minutes, polling the sources that have waited longest. On the free plan a run
+# reaches about 40 sources, so around 340 sources are each checked every hour and a half.
 crons = ["*/10 * * * *"]
 
 [vars]
-POLL_BATCH = "60"
+POLL_BATCH = "45"
+# Outbound requests allowed per run. The free plan fails a run above 50; on Workers Paid
+# raise this and POLL_BATCH together (for example 300 and 150).
+FETCH_BUDGET = "45"
 
 # Secrets (set with `npx wrangler secret put NAME`, never committed):
 #   APP_TOKEN      - the password the page asks for

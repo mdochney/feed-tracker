@@ -10,7 +10,11 @@ const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const fail = (status, error) => json({ error }, status);
 
-const pollOpts = (env) => ({ privateFeeds: privateFeeds(env), youtubeApiKey: env.YOUTUBE_API_KEY || null });
+const pollOpts = (env) => ({
+  privateFeeds: privateFeeds(env),
+  youtubeApiKey: env.YOUTUBE_API_KEY || null,
+  fetchBudget: Number(env.FETCH_BUDGET) || 45,
+});
 
 function privateFeeds(env) {
   if (!env.PRIVATE_FEEDS) return {};
@@ -87,7 +91,8 @@ async function api(request, env, ctx) {
   if (path === '/api/poll' && method === 'POST') {
     const { source_id: sourceId } = await body(request);
     const results = await pollBatch(db, { limit: batch, sourceId: sourceId ?? null, ...pollOpts(env) });
-    return json({ ok: true, polled: results.length, inserted: results.reduce((n, r) => n + (r.inserted ?? 0), 0), failed: results.filter((r) => !r.ok) });
+    const waiting = await db.prepare('SELECT COUNT(*) AS n FROM sources WHERE active = 1 AND last_polled_at IS NULL').first();
+    return json({ ok: true, polled: results.length, never_checked: waiting.n, inserted: results.reduce((n, r) => n + (r.inserted ?? 0), 0), failed: results.filter((r) => !r.ok) });
   }
 
   return fail(404, 'Not found');

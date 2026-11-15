@@ -251,3 +251,24 @@ test('YouTube via the Data API: items, empty playlists, 304s, quota errors, dura
   assert.match(third.error, /daily quota/);
   assert.ok(!/key=/.test(db.sqlite.prepare('SELECT last_status FROM sources').get().last_status), 'the key never lands in stored errors');
 });
+
+test('a run stays inside its request budget and leaves the rest for next time', async () => {
+  const db = await createDb();
+  for (let i = 0; i < 30; i++) {
+    await addSource(db, { key: `rss:s${i}`, platform: 'rss', name: `S${i}`, feed_url: `https://s${i}.example/feed` });
+  }
+  const xml = await fixture('substack.xml');
+  let calls = 0;
+  const fetchImpl = async () => { calls++; return new Response(xml); };
+
+  const first = await pollBatch(db, { limit: 100, fetchBudget: 12, fetchImpl });
+  assert.ok(calls <= 12, `made ${calls} requests`);
+  assert.ok(first.length >= 5 && first.length < 30, `polled ${first.length}`);
+  assert.ok(first.every((r) => r.ok), 'no source is failed by the budget');
+  const waiting = () => db.sqlite.prepare('SELECT COUNT(*) AS n FROM sources WHERE last_polled_at IS NULL').get().n;
+  assert.equal(waiting(), 30 - first.length);
+
+  // Repeated runs work through the remainder without re-polling the same sources first.
+  for (let i = 0; i < 6 && waiting() > 0; i++) await pollBatch(db, { limit: 100, fetchBudget: 12, fetchImpl });
+  assert.equal(waiting(), 0);
+});

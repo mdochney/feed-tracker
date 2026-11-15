@@ -694,7 +694,8 @@ $('poll-btn').addEventListener('click', async (e) => {
   $('poll-note').textContent = 'Checking…';
   try {
     const res = await api('/poll', { method: 'POST', body: {} });
-    $('poll-note').textContent = 'Checked ' + res.polled + ' sources, ' + res.inserted + ' new items' + (res.failed.length ? ', ' + res.failed.length + ' failed' : '') + '.';
+    $('poll-note').textContent = 'Checked ' + res.polled + ' sources, ' + res.inserted + ' new items' + (res.failed.length ? ', ' + res.failed.length + ' failed' : '') + '.' +
+      (res.never_checked ? ' ' + res.never_checked + ' sources still waiting for their first check; press again.' : '');
     await refresh();
   } catch (err) { $('poll-note').textContent = err.status === 401 ? '' : err.message; }
   b.disabled = false;
