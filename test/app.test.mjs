@@ -455,35 +455,70 @@ test('a text post is read aloud once, in pieces, and counted against the monthly
   const kv = {
     async get(k, type) { const v = store.get(k); return v == null ? null : type === 'json' ? JSON.parse(v) : v; },
     async put(k, v) { store.set(k, v); },
+    async delete(k) { store.delete(k); },
   };
-  const env = { DB: db, APP_TOKEN: 'secret', AUDIO: kv, YOUTUBE_API_KEY: 'k', TTS_MONTHLY_CHARS: '9000' };
-  const body = Array.from({ length: 12 }, (_, i) => `<p>${'Paragraph ' + i + ' of the post. '.repeat(30)}</p>`).join('');
+  const env = { DB: db, APP_TOKEN: 'secret', AUDIO: kv, YOUTUBE_API_KEY: 'k', TTS_MONTHLY_CHARS: '15000' };
+  const para = (i) => `<p>${('Paragraph ' + i + ' of the post. ').repeat(30)}</p>`;
+  const preview = para(0);
+  const body = Array.from({ length: 12 }, (_, i) => para(i)).join('');
+  const wordcount = articleText(body).match(/\S+/g).length;
+  const SID = 's%3Aabcdefghijklmnopqrstuvwxyz.0123456789', SID2 = 's%3Arenewedrenewedrenewedrenewed.0123456789';
   const calls = [];
+  const cookies = [];
   const realFetch = globalThis.fetch;
-  globalThis.fetch = async (url, init) => {
-    calls.push(String(url));
-    if (String(url) === 'https://x.example/api/v1/posts/a-post') return Response.json({ audience: 'only_paid', body_html: body });
-    if (String(url).startsWith('https://texttospeech.googleapis.com/')) {
+  globalThis.fetch = async (url, init = {}) => {
+    url = String(url);
+    calls.push(url);
+    const cookie = init.headers?.cookie ?? null;
+    if (cookie) { cookies.push([new URL(url).host, cookie]); assert.equal(init.redirect, 'manual'); }
+    const good = cookie === 'substack.sid=' + SID || cookie === 'substack.sid=' + SID2;
+    if (url === 'https://x.example/api/v1/posts/a-post') return Response.json({ id: 77, audience: 'only_paid', wordcount, body_html: preview });
+    if (url === 'https://substack.com/api/v1/posts/by-id/77') {
+      return Response.json({ post: { body_html: good ? body : preview } }, { headers: good ? { 'set-cookie': `substack.sid=${SID2}; Path=/; HttpOnly` } : {} });
+    }
+    if (url === 'https://substack.com/api/v1/subscriptions') return good ? Response.json({}) : new Response('{}', { status: 401 });
+    if (url.startsWith('https://texttospeech.googleapis.com/')) {
       assert.equal(init.headers['x-goog-api-key'], 'k');
       return Response.json({ audioContent: btoa('mp3:' + JSON.parse(init.body).input.text.length + ';') });
     }
     return new Response('no', { status: 404 });
   };
-  const call = (method, p) => worker.fetch(new Request('https://app.example' + p, { method, headers: { authorization: 'Bearer secret' } }), env, {});
+  const call = (method, p, b) => worker.fetch(new Request('https://app.example' + p, {
+    method, headers: { authorization: 'Bearer secret', 'content-type': 'application/json' }, body: b ? JSON.stringify(b) : undefined }), env, {});
+  const synth = () => calls.filter((u) => u.includes('texttospeech')).length;
   try {
     assert.equal((await call('GET', '/api/items/1/audio')).status, 404, 'nothing made yet');
-    const job = await (await call('POST', '/api/items/1/audio')).json();
-    assert.equal(job.ready, false);
-    assert.equal(job.partial, true, 'a paid post read without a login is only the preview');
+
+    // No sign-in: a paid post is only its preview, and nothing is made without a go-ahead.
+    let job = await (await call('POST', '/api/items/1/audio')).json();
+    assert.deepEqual([job.needs_confirm, job.partial, job.signed_in], [true, true, null]);
+    assert.equal(store.has('text:1'), false);
+    assert.equal(synth(), 0);
+
+    // A cookie Substack rejects is not saved; a good one is, and is never returned.
+    assert.equal((await call('PUT', '/api/substack-session', { cookie: 'substack.sid=s%3Awrongwrongwrongwrongwrong.000' })).status, 400);
+    assert.equal((await call('PUT', '/api/substack-session', { cookie: 'x' })).status, 400);
+    assert.equal(store.has('substack:sid'), false);
+    const saved = await call('PUT', '/api/substack-session', { cookie: ' substack.sid=' + SID + '; other=1' });
+    assert.equal(saved.status, 200);
+    const state = await (await call('GET', '/api/state')).json();
+    assert.deepEqual([state.substack_session.set, state.substack_session.ok], [true, true]);
+    assert.ok(!JSON.stringify(state).includes('abcdefghij') && !(await saved.text()).includes('abcdefghij'));
+
+    // Signed in: the full post is read, and the renewed cookie replaces the stored one.
+    job = await (await call('POST', '/api/items/1/audio')).json();
+    assert.deepEqual([job.ready, job.partial, job.needs_confirm], [false, false, undefined], JSON.stringify(job));
     assert.ok(job.parts >= 2);
+    assert.equal(store.get('substack:sid'), SID2);
+    assert.ok(cookies.length && cookies.every(([host]) => host === 'substack.com'), 'the cookie only ever goes to substack.com');
     for (let n = 0; n < job.parts; n++) {
       const r = await (await call('POST', `/api/items/1/audio/${n}`)).json();
       assert.equal(r.ready, n === job.parts - 1);
     }
-    const synthCalls = calls.filter((u) => u.includes('texttospeech')).length;
+    const synthCalls = synth();
     assert.equal(synthCalls, job.parts);
     await call('POST', '/api/items/1/audio/0');
-    assert.equal(calls.filter((u) => u.includes('texttospeech')).length, synthCalls, 'a stored part is never paid for twice');
+    assert.equal(synth(), synthCalls, 'a stored part is never paid for twice');
     const used = (await db.prepare('SELECT chars FROM tts_usage').first()).chars;
     assert.equal(used, job.chars - (job.parts - 1), 'every character sent is counted (joins between pieces are not sent)');
 
@@ -494,9 +529,18 @@ test('a text post is read aloud once, in pieces, and counted against the monthly
     assert.equal((await (await call('GET', '/api/items?view=new')).json()).items[0].tts_status, 'ready');
 
     await db.prepare("INSERT INTO items (source_id, guid, title, url, media_type) VALUES (1, 'h', 'Another', 'https://x.example/p/a-post', 'text')").run();
-    const over = await call('POST', '/api/items/2/audio');
-    assert.equal(over.status, 429, 'the monthly allowance stops new audio');
-    assert.equal((await call('POST', '/api/items/1/audio', )).status, 200);
+    assert.equal((await call('POST', '/api/items/2/audio')).status, 429, 'the monthly allowance stops new audio');
     assert.equal((await worker.fetch(new Request('https://app.example/api/items/1/audio'), env, {})).status, 401);
+
+    // An expired sign-in is reported, and the preview can still be read on request.
+    store.set('substack:sid', 's%3Aexpiredexpiredexpiredexpired.000');
+    env.TTS_MONTHLY_CHARS = '90000';
+    job = await (await call('POST', '/api/items/2/audio')).json();
+    assert.deepEqual([job.needs_confirm, job.signed_in], [true, false]);
+    assert.equal((await (await call('GET', '/api/state')).json()).substack_session.ok, false);
+    job = await (await call('POST', '/api/items/2/audio', { allow_partial: true })).json();
+    assert.deepEqual([job.partial, job.parts], [true, 1]);
+    assert.equal((await call('DELETE', '/api/substack-session')).status, 200);
+    assert.equal(store.has('substack:sid'), false);
   } finally { globalThis.fetch = realFetch; }
 });

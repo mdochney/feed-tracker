@@ -261,6 +261,17 @@ body.playing .toast { bottom: 96px; }
         <p class="hint">Paste a YouTube channel page, a Substack address, or any RSS or podcast feed.</p>
         <p class="note" id="add-note" hidden></p>
       </div>
+      <div class="panel" id="substack-panel" hidden>
+        <h2>Substack sign-in</h2>
+        <p class="hint" style="margin:0 0 8px">Lets Read aloud use the full text of posts you pay for. <span id="substack-status"></span></p>
+        <form id="substack-form">
+          <input type="password" id="substack-cookie" autocomplete="off" placeholder="substack.sid cookie value" aria-label="Substack sign-in cookie value" required>
+          <button class="btn primary" type="submit" id="substack-save">Save</button>
+          <button class="btn" type="button" id="substack-remove" hidden>Remove</button>
+        </form>
+        <p class="hint">To get it: open <a href="https://substack.com/home" target="_blank" rel="noopener noreferrer">substack.com</a> signed in, press F12, then Application → Cookies → https://substack.com, and copy the Value of the row named <code>substack.sid</code>. It is a login to your Substack account: it is stored on the server and never shown again.</p>
+        <p class="note" id="substack-note" hidden></p>
+      </div>
       <div class="panel">
         <h2>Your subscriptions</h2>
         <p class="hint" style="margin:0 0 8px">Pause hides a source’s new items and stops checking it. Remove also deletes its items from the tracker.</p>
@@ -426,13 +437,21 @@ async function listen(item, btn) {
     if (!spoken.has(item.id)) {
       if (item.tts_status !== 'ready') {
         btn.textContent = 'Reading the post…';
-        const job = await api('/items/' + item.id + '/audio', { method: 'POST', body: {} });
+        let job = await api('/items/' + item.id + '/audio', { method: 'POST', body: {} });
+        if (job.needs_confirm) {
+          const why = job.signed_in === false ? 'Your Substack sign-in has expired (renew it under Sources), so only'
+            : job.signed_in === true ? 'Your Substack account does not have access to this post, so only'
+            : 'This post is for paid subscribers and no Substack sign-in is saved (see Sources), so only';
+          if (job.signed_in === false) loadState().catch(() => {});
+          if (!confirm(why + ' the free preview can be read (about ' + job.chars.toLocaleString() + ' characters).\n\nMake audio of the preview anyway?')) { btn.textContent = label; return; }
+          btn.textContent = 'Reading the post…';
+          job = await api('/items/' + item.id + '/audio', { method: 'POST', body: { allow_partial: true } });
+        }
         if (!job.ready) {
           for (let n = 0; n < job.parts; n++) {
             btn.textContent = 'Making audio ' + (n + 1) + ' of ' + job.parts + '…';
             await api('/items/' + item.id + '/audio/' + n, { method: 'POST', body: {} });
           }
-          if (job.partial) showToast('Only the free preview of this post was available to read.');
         }
         item.tts_status = 'ready';
       }
@@ -468,10 +487,22 @@ $('player-close').addEventListener('click', () => {
 });
 
 // ---- loading ---------------------------------------------------------------
+let substackSession = { available: false, set: false };
+function renderSubstack() {
+  const s = substackSession;
+  $('substack-panel').hidden = !s.available;
+  $('substack-remove').hidden = !s.set;
+  const status = $('substack-status');
+  status.textContent = !s.set ? 'Not set.' : s.ok === false ? 'The saved sign-in has expired. Paste a new one.' : 'Saved and working' + (s.checked_at ? ' (checked ' + age(s.checked_at) + ').' : '.');
+  status.style.fontWeight = s.set && s.ok === false ? '600' : '';
+}
+
 async function loadState() {
   const state = await api('/state' + (view === 'cleared' || view === 'backlog' ? '?backlog=1' : ''));
   counts = state.counts;
   sources = state.sources;
+  substackSession = state.substack_session || substackSession;
+  renderSubstack();
   renderChrome();
 }
 
@@ -829,6 +860,23 @@ $('search').addEventListener('input', (e) => {
   searchTimer = setTimeout(() => loadItems().catch(report), 250);
 });
 $('toast-undo').addEventListener('click', undoLast);
+
+$('substack-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const note = $('substack-note'), btn = $('substack-save');
+  btn.disabled = true; note.hidden = true;
+  try {
+    const r = await api('/substack-session', { method: 'PUT', body: { cookie: $('substack-cookie').value } });
+    substackSession = r.substack_session;
+    $('substack-cookie').value = '';
+    renderSubstack();
+  } catch (err) { note.textContent = err.message; note.hidden = false; }
+  finally { btn.disabled = false; }
+});
+$('substack-remove').addEventListener('click', async () => {
+  if (!confirm('Remove the saved Substack sign-in? Paid posts will be read from their free preview only.')) return;
+  try { substackSession = (await api('/substack-session', { method: 'DELETE' })).substack_session; renderSubstack(); } catch (err) { report(err); }
+});
 
 $('add-form').addEventListener('submit', async (e) => {
   e.preventDefault();

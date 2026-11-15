@@ -76,7 +76,9 @@ See `migrations/0001_init.sql`.
   synthesized with Google Cloud Text-to-Speech (Chirp 3 HD voice) and kept in the KV
   namespace `AUDIO`. Made only on request; capped at 900,000 characters a month
   (`TTS_MONTHLY_CHARS`), under Google's 1,000,000 free.
-- [ ] Gmail as the text source for paid posts (today only the free preview is read)
+- [x] Paid posts: a Substack sign-in cookie (`substack.sid`), pasted on the Sources tab and
+  kept in KV, is sent only to substack.com to read the full post. A renewed cookie in a
+  reply replaces the stored one. Without it, a preview is read only after confirmation.
 - [ ] Optional: mirror queued videos to a YouTube playlist
 
 ## Open questions
