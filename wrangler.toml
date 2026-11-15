@@ -8,8 +8,7 @@ directory = "./public"
 [[d1_databases]]
 binding = "DB"
 database_name = "feed-tracker"
-# Replace with the id printed by: npx wrangler d1 create feed-tracker
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "c7dc8537-7db3-4e67-b500-0b5cd79b0eb3"
 migrations_dir = "migrations"
 
 [triggers]
