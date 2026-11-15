@@ -226,8 +226,7 @@ export async function estimateSubstackText(db, source, { fetchImpl = fetch } = {
   return missing.filter((m) => words.has(slug(m.url))).length;
 }
 
-export async function backfillTextEstimates(db, opts = {}, max = 3) {
-  if (max <= 0) return 0;
+export async function pendingTextSources(db, max = 6) {
   const since = new Date(Date.now() - 30 * 86400000).toISOString();
   // Only untriaged and queued items, which keeps this on the status index.
   const { results } = await db.prepare(
@@ -235,8 +234,12 @@ export async function backfillTextEstimates(db, opts = {}, max = 3) {
      WHERE i.status IN ('new', 'queued') AND i.media_type = 'text' AND i.duration_sec IS NULL AND i.url IS NOT NULL
        AND i.published_at >= ? AND s.platform = 'substack' AND s.active = 1
      GROUP BY i.source_id ORDER BY RANDOM() LIMIT ?`).bind(since, max).all();
+  return results.map((r) => r.source_id);
+}
+
+export async function backfillTextEstimates(db, opts = {}, ids = null) {
   let done = 0;
-  for (const { source_id: id } of results) {
+  for (const id of ids ?? await pendingTextSources(db)) {
     const source = await db.prepare('SELECT * FROM sources WHERE id = ?').bind(id).first();
     // A failure leaves the posts waiting: the random order means one unreachable
     // publication cannot hold up the others, and it is tried again on a later run.
@@ -284,7 +287,13 @@ export async function pollBatch(db, { limit = 20, concurrency = 6, sourceId = nu
     budget.left--;
     return rawFetch(url, init);
   };
-  const reserve = opts.youtubeApiKey ? 1 : 0;
+  // Publications with text posts still waiting for a length each need one request after
+  // polling, so that many are held back from the polling budget.
+  let waiting = [];
+  if (!sourceId) {
+    try { waiting = await pendingTextSources(db, 6); } catch (err) { console.warn(`post lengths unavailable (${err?.message ?? err})`); }
+  }
+  const reserve = (opts.youtubeApiKey ? 1 : 0) + waiting.length;
   let inFlight = 0;
   const query = sourceId
     ? db.prepare('SELECT * FROM sources WHERE id = ?').bind(sourceId)
@@ -302,10 +311,9 @@ export async function pollBatch(db, { limit = 20, concurrency = 6, sourceId = nu
       finally { inFlight--; }
     }
   }));
-  // Text posts still waiting for a length (their feed has not changed since they arrived):
-  // a few sources per run, with what is left of the budget.
-  if (!sourceId) {
-    try { await backfillTextEstimates(db, opts, Math.min(3, budget.left - reserve)); } catch (err) { console.warn(`post lengths unavailable (${err?.message ?? err})`); }
+  // Text posts still waiting for a length (their feed has not changed since they arrived).
+  if (waiting.length) {
+    try { await backfillTextEstimates(db, opts, waiting.slice(0, Math.max(0, budget.left - (opts.youtubeApiKey ? 1 : 0)))); } catch (err) { console.warn(`post lengths unavailable (${err?.message ?? err})`); }
   }
   if (opts.youtubeApiKey && budget.left >= 1) {
     try { await fillYoutubeDurations(db, opts); } catch (err) { console.warn(`YouTube durations unavailable (${err?.message ?? err})`); }

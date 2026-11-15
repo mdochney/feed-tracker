@@ -577,3 +577,24 @@ test('text posts get an estimated listening time from Substack word counts', asy
   const long = await listItems(db, { view: 'new', minMinutes: 10 });
   assert.deepEqual(long.items.map((i) => i.title).sort(), ['gone', 'long', 'pod'], 'the length filter now applies to text posts with a known length');
 });
+
+test('a full polling run still leaves room to look up waiting post lengths', async () => {
+  const db = await createDb();
+  const now = new Date().toISOString();
+  for (let i = 1; i <= 12; i++) {
+    await db.prepare("INSERT INTO sources (key, platform, name, feed_url) VALUES (?, 'substack', ?, ?)").bind('substack:s' + i, 'S' + i, `https://s${i}.example/feed`).run();
+  }
+  for (const i of [1, 2]) {
+    await db.prepare("INSERT INTO items (source_id, guid, title, url, media_type, published_at) VALUES (?, 'g', 'Waiting', ?, 'text', ?)").bind(i, `https://s${i}.example/p/waiting`, now).run();
+  }
+  const archive = [];
+  const fetchImpl = async (url) => {
+    if (url.includes('/api/v1/archive')) { archive.push(url); return Response.json({ posts: [{ slug: 'waiting', wordcount: 1600 }] }); }
+    return new Response('', { status: 304 });
+  };
+  // Ten requests for twelve sources: without holding two back, polling would use them all.
+  await pollBatch(db, { limit: 12, fetchBudget: 10, fetchImpl });
+  assert.equal(archive.length, 2);
+  const { results } = await db.prepare("SELECT duration_sec FROM items").all();
+  assert.deepEqual(results.map((r) => r.duration_sec), [600, 600]);
+});
