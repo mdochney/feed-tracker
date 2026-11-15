@@ -1,0 +1,14 @@
+{
+  "name": "feed-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20.11" },
+  "scripts": {
+    "test": "node --test",
+    "check-feeds": "node scripts/check-feeds.mjs"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.5.0"
+  }
+}

@@ -1,0 +1,63 @@
+key,platform,name,feed_url,av_tier,private_feed,active,notes
+substack:triggernometry,substack,TRIGGERnometry,https://triggernometry.substack.com/feed,regular,no,1,Video podcast; several episodes a week. Also sends guest-question and spotlight emails (filter to enclosure items)
+substack:staytuned,substack,Stay Tuned with Preet,https://staytuned.substack.com/feed,regular,no,1,Sections: podcast / insider / video-sessions
+substack:thelonggame,substack,The Long Game (Sullivan & Finer),https://thelonggame.substack.com/feed,regular,no,1,Weekly podcast plus short clips
+substack:samharris,substack,Sam Harris (Making Sense),https://samharris.substack.com/feed,regular,yes,1,Paid - copy private podcast feed URL
+substack:razib,substack,Razib Khan's Unsupervised Learning,https://razib.substack.com/feed,regular,check,1,Podcast roughly weekly
+substack:paulkrugman,substack,Paul Krugman,https://paulkrugman.substack.com/feed,regular,no,1,Video interviews most weeks
+substack:andrewsullivan,substack,The Weekly Dish (Dishcast),https://andrewsullivan.substack.com/feed,regular,yes,1,Weekly Dishcast - copy private podcast feed URL
+substack:noahpinion,substack,Noahpinion,https://noahpinion.substack.com/feed,regular,check,1,Hexapodia and other video/audio posts
+substack:mrgirl,substack,mrgirl,https://mrgirl.substack.com/feed,regular,no,1,Long video episodes
+substack:theargument,substack,The Argument,https://theargument.substack.com/feed,regular,no,1,Podcast section plus video interviews; many text sections too
+substack:mtracey,substack,Michael Tracey,https://mtracey.substack.com/feed,regular,yes,1,Video posts
+substack:matthewyglesias,substack,Matthew Yglesias (Slow Boring),https://matthewyglesias.substack.com/feed,regular,no,1,12 audio/video emails in the last year; latest seen Sep 2026
+substack:taibbi,substack,Racket News (Matt Taibbi),https://taibbi.substack.com/feed,regular,no,1,Mostly the Get Lit section
+substack:richardhanania,substack,Richard Hanania,https://richardhanania.substack.com/feed,occasional,yes,1,Podcast section (hanpod)
+substack:benthams,substack,Bentham's Newsletter,https://benthams.substack.com/feed,occasional,no,1,Occasional debates/videos
+substack:bariweiss,substack,The Free Press,https://bariweiss.substack.com/feed,occasional,no,1,Matches may be embedded links rather than native A/V - verify in feed test
+substack:robkhenderson,substack,Rob Henderson,https://robkhenderson.substack.com/feed,occasional,no,1,
+substack:freddiedeboer,substack,Freddie deBoer,https://freddiedeboer.substack.com/feed,occasional,no,1,
+substack:petebuttigieg,substack,Pete Buttigieg,https://petebuttigieg.substack.com/feed,occasional,no,1,
+substack:gordonmaitken,substack,Gordon Aitken - Insurance Black Box,https://gordonmaitken.substack.com/feed,occasional,no,1,
+substack:betonit,substack,Bet On It (Bryan Caplan),https://betonit.substack.com/feed,occasional,yes,1,
+substack:conspicuouscognition,substack,Conspicuous Cognition,https://conspicuouscognition.substack.com/feed,occasional,no,1,
+substack:amandaknox,substack,Amanda Knox,https://amandaknox.substack.com/feed,occasional,no,1,
+substack:richarddawkins,substack,The Poetry of Reality (Richard Dawkins),https://richarddawkins.substack.com/feed,occasional,no,1,
+substack:marypatcampbell,substack,STUMP (Mary Pat Campbell),https://marypatcampbell.substack.com/feed,occasional,no,1,
+substack:nathancofnas,substack,Nathan Cofnas,https://nathancofnas.substack.com/feed,occasional,no,1,
+substack:ritchietorres,substack,Ritchie Torres,https://ritchietorres.substack.com/feed,occasional,no,1,
+substack:peteribanks,substack,Peter Banks,https://peteribanks.substack.com/feed,occasional,no,1,
+substack:jessesingal,substack,Singal-Minded,https://jessesingal.substack.com/feed,occasional,check,1,
+substack:cartoonshateher,substack,Cartoons Hate Her,https://cartoonshateher.substack.com/feed,occasional,no,1,
+substack:natesilver,substack,Silver Bulletin,https://natesilver.substack.com/feed,occasional,check,1,
+substack:mikepesca,substack,Mike Pesca / The Gist,https://mikepesca.substack.com/feed,occasional,no,1,No emails since Aug 2026 - possibly unsubscribed
+substack:astralcodexten,substack,Astral Codex Ten,https://astralcodexten.substack.com/feed,none,no,1,Text only
+substack:fakenous,substack,Fake Nous,https://fakenous.substack.com/feed,none,no,1,Text only
+substack:restoringamericanadulthood,substack,Restoring American Adulthood,https://restoringamericanadulthood.substack.com/feed,none,no,1,Text only
+substack:aporiamagazine,substack,Aporia,https://aporiamagazine.substack.com/feed,none,no,1,Text only
+substack:thezvi,substack,Don't Worry About the Vase (Zvi),https://thezvi.substack.com/feed,none,no,1,Text only
+substack:overcomingbias,substack,Overcoming Bias,https://overcomingbias.substack.com/feed,none,no,1,Text only
+substack:constructionphysics,substack,Construction Physics,https://constructionphysics.substack.com/feed,none,no,1,Text only
+substack:netinterest,substack,Net Interest,https://netinterest.substack.com/feed,none,no,1,Text only
+substack:derekthompson,substack,Derek Thompson,https://derekthompson.substack.com/feed,none,no,1,Text only
+substack:benrothenberg,substack,Bounces (Ben Rothenberg),https://benrothenberg.substack.com/feed,none,no,1,Text only
+substack:manifoldmarkets,substack,Manifold Markets,https://manifoldmarkets.substack.com/feed,none,no,1,Text only
+substack:polymarket,substack,The Oracle by Polymarket,https://polymarket.substack.com/feed,none,no,1,Text only
+substack:cocktailswithsuderman,substack,Cocktails With Suderman,https://cocktailswithsuderman.substack.com/feed,none,no,1,Text only
+substack:nicholasdecker,substack,Homo Economicus (Nicholas Decker),https://nicholasdecker.substack.com/feed,none,no,1,Text only
+substack:rychappell,substack,Good Thoughts (Richard Y Chappell),https://rychappell.substack.com/feed,none,no,1,Text only
+substack:scottsumner,substack,The Pursuit of Happiness (Scott Sumner),https://scottsumner.substack.com/feed,none,no,1,Text only
+substack:daviddfriedman,substack,David Friedman,https://daviddfriedman.substack.com/feed,none,no,1,Text only
+substack:buildphillynow,substack,Build Philly Now,https://buildphillynow.substack.com/feed,none,no,1,Text only
+substack:graymirror,substack,Gray Mirror (Curtis Yarvin),https://graymirror.substack.com/feed,none,no,1,Text only
+substack:hypertextjournal,substack,Hypertext (Niskanen Center),https://hypertextjournal.substack.com/feed,none,no,1,Text only
+substack:broadandmarket,substack,Broad and Market,https://broadandmarket.substack.com/feed,none,no,1,Text only
+substack:wesleyyang,substack,Year Zero (Wesley Yang),https://wesleyyang.substack.com/feed,none,no,1,Text only
+substack:tracingwoodgrains,substack,Tracing Woodgrains,https://tracingwoodgrains.substack.com/feed,none,no,1,Text only
+substack:officialjimmycarr,substack,Jimmy Carr,https://officialjimmycarr.substack.com/feed,none,no,1,Text only
+substack:jasonpargin,substack,Jason Pargin,https://jasonpargin.substack.com/feed,none,no,1,Text only
+substack:shakoist,substack,Shakos Metaheuristics,https://shakoist.substack.com/feed,none,no,1,Text only
+substack:bendreyfuss,substack,Ben Dreyfuss,https://bendreyfuss.substack.com/feed,none,no,1,Text only
+substack:infinitescroll,substack,Infinite Scroll,https://infinitescroll.substack.com/feed,none,no,1,Text only; no emails since Jul 2026
+substack:davidoks,substack,David Oks,https://davidoks.substack.com/feed,none,no,1,Text only; no emails since Jul 2026
+substack:post,substack,The Substack Post,https://post.substack.com/feed,none,no,0,Substack's own publication - probably exclude

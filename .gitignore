@@ -1,0 +1,6 @@
+node_modules/
+reports/
+.wrangler/
+.dev.vars
+# Private (paid) feed URLs are credentials: keep them out of the repo.
+private-feeds.json

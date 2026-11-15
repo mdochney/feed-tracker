@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+ <channel>
+  <title><![CDATA[Example Letter]]></title>
+  <description><![CDATA[A fixture publication]]></description>
+  <link>https://example.substack.com</link>
+  <atom:link href="https://example.substack.com/feed" rel="self" type="application/rss+xml"/>
+  <item>
+   <title><![CDATA[Episode 12: A conversation]]></title>
+   <description><![CDATA[<p>We talk about <b>feeds</b> &amp; queues.</p>]]></description>
+   <link>https://example.substack.com/p/episode-12</link>
+   <guid isPermaLink="false">https://example.substack.com/p/episode-12</guid>
+   <dc:creator><![CDATA[Host]]></dc:creator>
+   <pubDate>Thu, 12 Nov 2026 18:53:47 GMT</pubDate>
+   <enclosure url="https://api.substack.com/feed/podcast/123456/abcdef.mp3" length="0" type="audio/mpeg"/>
+   <itunes:duration>1:42:05</itunes:duration>
+   <itunes:image href="https://substackcdn.com/image/ep12.jpg"/>
+  </item>
+  <item>
+   <title><![CDATA[An essay with no audio]]></title>
+   <description><![CDATA[Plain text post.]]></description>
+   <link>https://example.substack.com/p/an-essay</link>
+   <guid isPermaLink="false">https://example.substack.com/p/an-essay</guid>
+   <pubDate>Wed, 11 Nov 2026 12:00:00 GMT</pubDate>
+   <enclosure url="https://substackcdn.com/image/essay.jpeg" length="0" type="image/jpeg"/>
+   <content:encoded><![CDATA[<p>Full text here.</p>]]></content:encoded>
+  </item>
+ </channel>
+</rss>
