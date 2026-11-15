@@ -22,8 +22,9 @@ triage each item: add to the watch-next queue, or dismiss.
   GitHub Action that pushes parsed items to the Worker.
 - **Text posts are included** and can be listened to: audio is generated when a post is
   queued (not on ingest), stored in R2, with browser speech synthesis as the fallback.
-- **Secrets stay out of the repo.** Private feed URLs are credentials. They live in the
-  `PRIVATE_FEEDS` Worker secret (a JSON map of source key to URL) and, locally, in the
+- **Secrets stay out of the repo.** Private feed URLs are credentials. They are saved per
+  source in the database from the Sources tab (the `PRIVATE_FEEDS` Worker secret, a JSON
+  map of source key to URL, still works as a fallback) and, for local scripts, in the
   git-ignored `private-feeds.json`.
 
 ## Data model
@@ -56,7 +57,9 @@ See `migrations/0001_init.sql`.
 - [x] YouTube: 274 channels seeded; polled through the Data API (the public feeds were
       down for over a week in November 2026). Needs the `YOUTUBE_API_KEY` secret.
 - [ ] Podcast seed (needs the list of Spotify shows; resolve each to RSS)
-- [ ] Private feed URLs for paid Substack shows
+- [x] Private feeds: saved per source from the Sources tab (stored in D1, never sent back
+      to the browser). On Substack the private podcast feed is merged into the items from
+      the publication feed, matched on post address, so episodes are not duplicated.
 - [x] Worker: cron poller writing to D1, first-run backfill rule (items older than a
       week start out dismissed)
 - [x] JSON API: list items, change status, add / pause / remove sources, poll on demand

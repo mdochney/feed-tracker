@@ -3,6 +3,7 @@
 
 import {
   pollBatch, listItems, getState, setItemStatus, addSource, updateSource, deleteSource, pollAndStore,
+  enrichSubstackAudio,
 } from './store.js';
 import { resolveSource } from './resolve.js';
 
@@ -82,7 +83,27 @@ async function api(request, env, ctx) {
 
   m = path.match(/^\/api\/sources\/(\d+)$/);
   if (m && method === 'PATCH') {
-    return (await updateSource(db, m[1], await body(request))) ? json({ ok: true }) : fail(404, 'No such source, or nothing to change');
+    const change = await body(request);
+    let changed;
+    try { changed = await updateSource(db, m[1], change); } catch (err) {
+      if (err instanceof RangeError) return fail(400, err.message);
+      throw err;
+    }
+    if (!changed) return fail(404, 'No such source, or nothing to change');
+    // A newly set private feed is applied straight away, so a bad address is reported now.
+    if (change.private_feed_url) {
+      const source = await db.prepare('SELECT * FROM sources WHERE id = ?').bind(Number(m[1])).first();
+      try {
+        const updated = source.platform === 'substack'
+          ? await enrichSubstackAudio(db, source, pollOpts(env))
+          : (await pollAndStore(db, { ...source, etag: null, last_modified: null }, pollOpts(env))).inserted ?? 0;
+        return json({ ok: true, private_feed: 'applied', updated });
+      } catch (err) {
+        await db.prepare('UPDATE sources SET private_feed_url = NULL WHERE id = ?').bind(source.id).run();
+        return fail(400, 'That private feed could not be read (' + String(err?.message ?? err).slice(0, 80) + '). It was not saved.');
+      }
+    }
+    return json({ ok: true });
   }
   if (m && method === 'DELETE') {
     return (await deleteSource(db, m[1])) ? json({ ok: true }) : fail(404, 'No such source');

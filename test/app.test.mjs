@@ -166,7 +166,8 @@ test('Substack episodes pick up duration and art from the show\u2019s podcast fe
   const podcastXml = `<rss><channel><item><title>Ep</title><link>${post}</link>
     <itunes:duration>1797</itunes:duration><itunes:image href="https://substackcdn.com/feed/podcast/94899/post/1/art.jpg"/></item>
     <item><link>https://example.substack.com/p/other</link><itunes:duration>1:02:05</itunes:duration></item></channel></rss>`;
-  assert.deepEqual(scanPodcastFeed(podcastXml).get('https://example.substack.com/p/other'), { duration_sec: 3725, thumbnail_url: null });
+  const other = scanPodcastFeed(podcastXml).get('https://example.substack.com/p/other');
+  assert.deepEqual([other.duration_sec, other.thumbnail_url], [3725, null]);
 
   const calls = [];
   const fetchImpl = async (url) => {
@@ -308,4 +309,73 @@ test('a source whose first attempts failed still has its backlog skipped when it
   const rows = Object.fromEntries(db.sqlite.prepare('SELECT guid, status, auto_dismissed FROM items').all().map((r) => [r.guid, r]));
   assert.equal(rows.fresh.status, 'new');
   assert.deepEqual([rows.stale.status, rows.stale.auto_dismissed], ['dismissed', 1]);
+});
+
+test('a private Substack feed upgrades existing episodes in place and adds subscriber-only ones', async () => {
+  const { syncPrivateSubstackFeed } = await import('../src/store.js');
+  const { db, source } = await seeded();
+  const at = '2026-11-14T12:00:00Z';
+  const post = (slug) => `https://example.substack.com/p/${slug}`;
+  await storePoll(db, source, {
+    status: 'ok',
+    items: [
+      item(post('ep-public'), '2026-11-13T10:00:00.000Z', { url: post('ep-public'), media_type: 'audio', media_url: 'https://api.substack.com/feed/podcast/1/preview.mp3' }),
+      item(post('essay'), '2026-11-12T10:00:00.000Z', { url: post('essay') }),
+    ],
+  }, at);
+  const privateXml = `<rss><channel>
+    <item><title><![CDATA[Episode, in full]]></title><link>${post('ep-public')}</link><guid isPermaLink="false">substack:post:1</guid>
+      <pubDate>Fri, 13 Nov 2026 10:00:00 GMT</pubDate><enclosure url="https://api.substack.com/feed/podcast/1/private/full.mp3?token=abc&amp;x=1" type="audio/mpeg"/>
+      <itunes:duration>3600</itunes:duration><itunes:image href="https://substackcdn.com/art.jpg"/></item>
+    <item><title>Subscriber only</title><link>${post('ep-paid')}</link><guid isPermaLink="false">substack:post:2</guid>
+      <pubDate>Thu, 12 Nov 2026 09:00:00 GMT</pubDate><enclosure url="https://api.substack.com/feed/podcast/2/private/paid.mp3" type="audio/mpeg"/><itunes:duration>120</itunes:duration></item>
+    <item><title>Ancient</title><link>${post('ep-old')}</link><pubDate>Thu, 01 Jan 2026 09:00:00 GMT</pubDate><enclosure url="https://api.substack.com/x.mp3" type="audio/mpeg"/></item>
+  </channel></rss>`;
+  const fetchImpl = async () => new Response(privateXml);
+  const src = db.sqlite.prepare('SELECT * FROM sources').get();
+
+  assert.equal(await syncPrivateSubstackFeed(db, src, 'https://api.substack.com/feed/podcast/9/private/t.rss', { fetchImpl, at }), 2);
+  const rows = Object.fromEntries(db.sqlite.prepare('SELECT guid, title, media_type, media_url, duration_sec, status FROM items').all().map((r) => [r.guid, r]));
+  assert.equal(Object.keys(rows).length, 3, 'no duplicate of the public episode, and the old one is not added');
+  assert.equal(rows[post('ep-public')].media_url, 'https://api.substack.com/feed/podcast/1/private/full.mp3?token=abc&x=1');
+  assert.equal(rows[post('ep-public')].duration_sec, 3600);
+  assert.equal(rows[post('ep-public')].title, 'Title ' + post('ep-public'), 'the existing item is kept, only its media changes');
+  assert.deepEqual([rows[post('ep-paid')].title, rows[post('ep-paid')].media_type, rows[post('ep-paid')].status], ['Subscriber only', 'audio', 'new']);
+  assert.equal(rows[post('essay')].media_type, 'text');
+
+  // Running it again changes nothing.
+  assert.equal(await syncPrivateSubstackFeed(db, src, 'https://x', { fetchImpl, at }), 0);
+
+  // If the public feed later lists the subscriber-only episode, it merges into the same item.
+  await storePoll(db, db.sqlite.prepare('SELECT * FROM sources').get(), {
+    status: 'ok', items: [item(post('ep-paid'), '2026-11-12T09:00:00.000Z', { url: post('ep-paid'), media_type: 'audio', media_url: 'https://api.substack.com/feed/podcast/2/preview.mp3' })],
+  }, at);
+  assert.equal(db.sqlite.prepare('SELECT COUNT(*) AS n FROM items').get().n, 3);
+});
+
+test('API: saving a private feed applies it, hides the address, and rejects bad ones', async () => {
+  const { db, source } = await seeded();
+  const env = { DB: db, APP_TOKEN: 'secret' };
+  const call = (method, p, bodyObj) => worker.fetch(new Request('https://app.example' + p, {
+    method, headers: { authorization: 'Bearer secret', 'content-type': 'application/json' }, body: bodyObj ? JSON.stringify(bodyObj) : undefined,
+  }), env, {});
+  assert.equal((await call('PATCH', `/api/sources/${source.id}`, { private_feed_url: 'not a url' })).status, 400);
+
+  const realFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response('gone', { status: 404 });
+    const bad = await call('PATCH', `/api/sources/${source.id}`, { private_feed_url: 'https://api.substack.com/feed/podcast/9/private/bad.rss' });
+    assert.equal(bad.status, 400);
+    assert.equal(db.sqlite.prepare('SELECT private_feed_url FROM sources').get().private_feed_url, null, 'an unreadable address is not kept');
+
+    globalThis.fetch = async () => new Response('<rss><channel></channel></rss>');
+    const ok = await call('PATCH', `/api/sources/${source.id}`, { private_feed_url: 'https://api.substack.com/feed/podcast/9/private/good.rss' });
+    assert.equal(ok.status, 200);
+  } finally { globalThis.fetch = realFetch; }
+
+  const state = await (await call('GET', '/api/state')).json();
+  assert.equal(state.sources[0].has_private_feed, 1);
+  assert.ok(!JSON.stringify(state).includes('good.rss'), 'the address is never sent back');
+  assert.equal((await call('PATCH', `/api/sources/${source.id}`, { private_feed_url: '' })).status, 200);
+  assert.equal((await getState(db)).sources[0].has_private_feed, 0);
 });

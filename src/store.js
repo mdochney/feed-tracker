@@ -79,14 +79,21 @@ export function scanPodcastFeed(xml) {
     const parts = dur ? dur.split(':').map(Number) : [];
     const seconds = parts.length && !parts.some(Number.isNaN) ? Math.round(parts.reduce((a, p) => a * 60 + p, 0)) : null;
     const image = block.match(/<itunes:image href="([^"]+)"/)?.[1]?.replace(/&amp;/g, '&') ?? null;
-    out.set(link, { duration_sec: seconds || null, thumbnail_url: image });
+    const media = block.match(/<enclosure\b[^>]*\burl="([^"]+)"/)?.[1]?.replace(/&amp;/g, '&') ?? null;
+    const title = block.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/)?.[1]?.trim() ?? null;
+    const date = block.match(/<pubDate>([^<]+)<\/pubDate>/)?.[1];
+    const published = date && !Number.isNaN(Date.parse(date)) ? new Date(date).toISOString() : null;
+    out.set(link, { duration_sec: seconds || null, thumbnail_url: image, media_url: media, title, published_at: published });
   }
   return out;
 }
 
 // Fill in durations for a Substack source's recent audio items. Returns how many were updated.
 export async function enrichSubstackAudio(db, source, { fetchImpl = fetch, privateFeeds = {} } = {}) {
-  if (source.platform !== 'substack' || source.podcast_feed_url === '' || privateFeeds[source.key]) return 0;
+  if (source.platform !== 'substack') return 0;
+  const privateUrl = source.private_feed_url || privateFeeds[source.key] || null;
+  if (privateUrl) return syncPrivateSubstackFeed(db, source, privateUrl, { fetchImpl });
+  if (source.podcast_feed_url === '') return 0;
   const since = new Date(Date.now() - 30 * 86400000).toISOString();
   const { results: missing } = await db.prepare(
     `SELECT id, url FROM items WHERE source_id = ? AND media_type <> 'text' AND duration_sec IS NULL
@@ -117,6 +124,37 @@ export async function enrichSubstackAudio(db, source, { fetchImpl = fetch, priva
     if (d?.duration_sec) {
       stmts.push(db.prepare('UPDATE items SET duration_sec = ?, thumbnail_url = COALESCE(?, thumbnail_url) WHERE id = ?')
         .bind(d.duration_sec, d.thumbnail_url, row.id));
+    }
+  }
+  if (stmts.length) await db.batch(stmts);
+  return stmts.length;
+}
+
+// A paid Substack show's private podcast feed carries the full episodes. It is merged into
+// the items already loaded from the publication's feed, matched on the post's address, so
+// each episode stays one item: its audio is swapped for the full version and its duration
+// and art are filled in. Subscriber-only episodes missing from the public feed are added.
+export async function syncPrivateSubstackFeed(db, source, privateUrl, { fetchImpl = fetch, at = nowIso() } = {}) {
+  const entries = [...scanPodcastFeed(await getText(privateUrl, fetchImpl))].slice(0, 40);
+  if (!entries.length) return 0;
+  const { results: existing } = await db.prepare(
+    'SELECT id, url, media_url, duration_sec FROM items WHERE source_id = ? AND url IS NOT NULL ORDER BY published_at DESC LIMIT 300').bind(source.id).all();
+  const byUrl = new Map(existing.map((r) => [r.url, r]));
+  const cutoff = new Date(Date.parse(at) - BACKFILL_DAYS * 86400000).toISOString();
+  const stmts = [];
+  for (const [link, d] of entries) {
+    if (!d.media_url) continue;
+    const row = byUrl.get(link);
+    if (row) {
+      if (row.media_url === d.media_url && (row.duration_sec || !d.duration_sec)) continue;
+      stmts.push(db.prepare(
+        `UPDATE items SET media_url = ?, media_type = CASE WHEN media_type = 'text' THEN 'audio' ELSE media_type END,
+                duration_sec = COALESCE(?, duration_sec), thumbnail_url = COALESCE(thumbnail_url, ?) WHERE id = ?`)
+        .bind(d.media_url, d.duration_sec, d.thumbnail_url, row.id));
+    } else if (d.title && d.published_at && d.published_at >= cutoff) {
+      // Same id the publication feed would use (the post's address), so a later public copy merges.
+      stmts.push(db.prepare(UPSERT_ITEM).bind(source.id, link, d.title, link, d.published_at, 'audio', d.media_url,
+        d.duration_sec, d.thumbnail_url, null, 'new', null, at, 0));
     }
   }
   if (stmts.length) await db.batch(stmts);
@@ -238,6 +276,7 @@ export async function getState(db) {
     FROM items i JOIN sources s ON s.id = i.source_id`).first();
   const { results: sources } = await db.prepare(`
     SELECT s.id, s.key, s.platform, s.name, s.feed_url, s.site_url, s.active, s.last_polled_at, s.last_status,
+           (s.private_feed_url IS NOT NULL AND s.private_feed_url <> '') AS has_private_feed,
            (SELECT COUNT(*) FROM items i WHERE i.source_id = s.id AND i.status = 'new') AS new_count
     FROM sources s ORDER BY s.name COLLATE NOCASE`).all();
   return { counts, sources };
@@ -268,9 +307,14 @@ export async function addSource(db, { key, platform, name, feed_url, site_url = 
   return { source, created: true };
 }
 
-export async function updateSource(db, id, { active, name }) {
+export async function updateSource(db, id, { active, name, private_feed_url: privateUrl }) {
   const sets = [];
   const args = [];
+  if (privateUrl !== undefined) {
+    const value = String(privateUrl ?? '').trim();
+    if (value && !/^https:\/\/[^\s]+$/.test(value)) throw new RangeError('The private feed must be an https address');
+    sets.push('private_feed_url = ?'); args.push(value || null);
+  }
   if (active !== undefined) { sets.push('active = ?'); args.push(active ? 1 : 0); }
   if (typeof name === 'string' && name.trim()) { sets.push('name = ?'); args.push(name.trim().slice(0, 200)); }
   if (!sets.length) return false;

@@ -179,6 +179,9 @@ table.sources { width: 100%; border-collapse: collapse; font-size: 14px; }
 .sources .err { color: var(--warn); font-size: 12.5px; }
 .tablewrap { overflow-x: auto; }
 .btn.small { padding: 4px 9px; font-size: 12.5px; }
+.private-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.private-form input { font: inherit; font-size: 14px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; flex: 1 1 280px; min-width: 0; }
+.private-row td { background: var(--bg); }
 .btn.quiet { border-color: transparent; background: none; color: var(--muted); font-weight: 500; padding: 6px 8px; }
 .btn.quiet:hover { color: var(--ink); border-color: var(--line); }
 .acts { flex-wrap: wrap; }
@@ -643,6 +646,42 @@ function renderItems() {
   backlogNote();
 }
 
+// Inline form under a source row for a paid show's private feed address.
+function privateFeedRow(s) {
+  const tr = el('tr', 'private-row');
+  const td = el('td'); td.colSpan = 5;
+  const form = el('form', 'private-form');
+  const input = el('input');
+  input.type = 'url'; input.id = 'private-feed-' + s.id; input.required = true; input.autocomplete = 'off';
+  input.placeholder = 'Private feed address for ' + s.name;
+  input.setAttribute('aria-label', 'Private feed address for ' + s.name);
+  const save = el('button', 'btn primary small', 'Save'); save.type = 'submit';
+  const note = el('p', 'hint', s.has_private_feed
+    ? 'A private feed is saved for this source. Saving a new address replaces it. The saved address is never shown again.'
+    : 'Paste the per-subscriber feed address from the show\u2019s subscription settings. It is stored with your tracker and never shown again.');
+  form.append(input, save);
+  if (s.has_private_feed) {
+    form.append(button('Remove private feed', 'small', async () => {
+      try { await api('/sources/' + s.id, { method: 'PATCH', body: { private_feed_url: '' } }); await refresh(); } catch (err) { report(err); }
+    }));
+  }
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    save.disabled = true; save.textContent = 'Saving…';
+    try {
+      const res = await api('/sources/' + s.id, { method: 'PATCH', body: { private_feed_url: input.value.trim() } });
+      showToast('Private feed saved for ' + s.name + (res.updated ? '. ' + res.updated + ' episodes updated.' : '.'), false);
+      await refresh();
+    } catch (err) {
+      if (err.status !== 401) { note.className = 'note bad'; note.textContent = err.message; }
+      save.disabled = false; save.textContent = 'Save';
+    }
+  });
+  td.append(form, note);
+  tr.append(td);
+  return tr;
+}
+
 function renderSources() {
   const body = $('sources-body');
   body.textContent = '';
@@ -670,6 +709,13 @@ function renderSources() {
       e.currentTarget.disabled = true;
       try { await api('/sources/' + s.id, { method: 'PATCH', body: { active: !s.active } }); await refresh(); } catch (err) { report(err); }
     }));
+    if (s.platform !== 'youtube') {
+      wrap.append(button(s.has_private_feed ? 'Private feed set' : 'Private feed', 'small', () => {
+        const open = tr.nextElementSibling?.classList.contains('private-row');
+        document.querySelectorAll('.private-row').forEach((r) => r.remove());
+        if (!open) tr.after(privateFeedRow(s));
+      }));
+    }
     let armed = false;
     wrap.append(button('Remove', 'small', async (e) => {
       const b = e.currentTarget;

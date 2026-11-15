@@ -29,7 +29,11 @@ const USER_AGENT = 'feed-tracker/0.1 (personal feed reader)';
 export async function pollSource(source, { fetchImpl = fetch, privateFeeds = {}, timeoutMs = 15000, youtubeApiKey = null } = {}) {
   // YouTube goes through the Data API when a key is configured; its public feeds are unreliable.
   if (source.platform === 'youtube' && youtubeApiKey) return pollYoutube(source, { apiKey: youtubeApiKey, fetchImpl });
-  const url = privateFeeds[source.key] ?? source.feed_url;
+  // A private address replaces the public one, except on Substack: there the private feed is
+  // a podcast feed with different ids and no text posts, so it is merged in afterwards instead
+  // (see syncPrivateSubstackFeed in store.js).
+  const privateUrl = source.platform === 'substack' ? null : (source.private_feed_url || privateFeeds[source.key] || null);
+  const url = privateUrl ?? source.feed_url;
   const headers = { 'user-agent': USER_AGENT, accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml' };
   if (source.etag) headers['if-none-match'] = source.etag;
   if (source.last_modified) headers['if-modified-since'] = source.last_modified;
@@ -59,6 +63,6 @@ export async function pollSource(source, { fetchImpl = fetch, privateFeeds = {},
     etag: res.headers.get('etag'),
     last_modified: res.headers.get('last-modified'),
     // Where the public feed really lives, so later polls can skip the redirect.
-    moved_to: finalUrl !== url && !privateFeeds[source.key] ? finalUrl : null,
+    moved_to: finalUrl !== url && !privateUrl ? finalUrl : null,
   };
 }
