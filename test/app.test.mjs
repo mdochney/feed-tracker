@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createDb } from './d1-shim.mjs';
-import { storePoll, pollBatch, listItems, getState, addSource } from '../src/store.js';
+import { storePoll, pollBatch, listItems, getState, addSource, setItemStatus, scanPodcastFeed, enrichSubstackAudio } from '../src/store.js';
 import { resolveSource } from '../src/resolve.js';
 import worker from '../src/worker.js';
 
@@ -102,7 +102,7 @@ test('API: auth, listing, status changes, queue order, source toggles', async ()
   assert.equal((await call(env, 'GET', '/api/state', null, 'wrong')).status, 401);
 
   const state = await (await call(env, 'GET', '/api/state')).json();
-  assert.deepEqual(state.counts, { new: 3, queue: 0, cleared: 0 });
+  assert.deepEqual(state.counts, { new: 3, queue: 0, cleared: 0, backlog: 0 });
   assert.equal(state.sources[0].new_count, 3);
 
   const all = await (await call(env, 'GET', '/api/items?view=new')).json();
@@ -122,7 +122,7 @@ test('API: auth, listing, status changes, queue order, source toggles', async ()
 
   const queue = await (await call(env, 'GET', '/api/items?view=queue')).json();
   assert.deepEqual(queue.items.map((i) => i.title), ['Title c', 'Title a'], 'queue keeps the order items were added');
-  assert.deepEqual((await getState(db)).counts, { new: 0, queue: 2, cleared: 1 });
+  assert.deepEqual((await getState(db)).counts, { new: 0, queue: 2, cleared: 1, backlog: 0 });
 
   // Undo: back to new.
   await call(env, 'POST', `/api/items/${b.id}`, { status: 'new' });
@@ -134,4 +134,56 @@ test('API: auth, listing, status changes, queue order, source toggles', async ()
   assert.equal((await call(env, 'DELETE', `/api/sources/${source.id}`)).status, 200);
   assert.equal(db.sqlite.prepare('SELECT COUNT(*) AS n FROM items').get().n, 0);
   assert.equal((await call(env, 'GET', '/api/nope')).status, 404);
+});
+
+test('the skipped backlog stays out of Cleared until an item is restored', async () => {
+  const { db, source } = await seeded();
+  await storePoll(db, source, {
+    status: 'ok',
+    items: [item('fresh', '2026-11-13T10:00:00.000Z'), item('stale', '2026-10-01T10:00:00.000Z')],
+  }, '2026-11-14T12:00:00Z');
+  const fresh = db.sqlite.prepare("SELECT id FROM items WHERE guid = 'fresh'").get().id;
+  const stale = db.sqlite.prepare("SELECT id FROM items WHERE guid = 'stale'").get().id;
+  await setItemStatus(db, fresh, 'dismissed');
+
+  assert.deepEqual((await getState(db)).counts, { new: 0, queue: 0, cleared: 1, backlog: 1 });
+  assert.deepEqual((await listItems(db, { view: 'cleared' })).items.map((i) => i.id), [fresh]);
+  assert.deepEqual((await listItems(db, { view: 'backlog' })).items.map((i) => i.id), [stale]);
+
+  // Restoring then dismissing by hand makes it an ordinary cleared item.
+  await setItemStatus(db, stale, 'new');
+  await setItemStatus(db, stale, 'dismissed');
+  assert.deepEqual((await getState(db)).counts, { new: 0, queue: 0, cleared: 2, backlog: 0 });
+});
+
+test('Substack episodes pick up duration and art from the show\u2019s podcast feed', async () => {
+  const { db, source } = await seeded();
+  const post = 'https://example.substack.com/p/episode-12';
+  await storePoll(db, source, {
+    status: 'ok',
+    items: [item('ep', new Date().toISOString(), { url: post, media_type: 'audio', media_url: 'https://api.substack.com/feed/podcast/1/a.mp3' })],
+  });
+  const podcastXml = `<rss><channel><item><title>Ep</title><link>${post}</link>
+    <itunes:duration>1797</itunes:duration><itunes:image href="https://substackcdn.com/feed/podcast/94899/post/1/art.jpg"/></item>
+    <item><link>https://example.substack.com/p/other</link><itunes:duration>1:02:05</itunes:duration></item></channel></rss>`;
+  assert.deepEqual(scanPodcastFeed(podcastXml).get('https://example.substack.com/p/other'), { duration_sec: 3725, thumbnail_url: null });
+
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(url);
+    if (url === post) return new Response('<script>{"publication_id":94899,"x":1}</script>');
+    if (url === 'https://api.substack.com/feed/podcast/94899.rss') return new Response(podcastXml);
+    return new Response('no', { status: 404 });
+  };
+  const row = () => db.sqlite.prepare('SELECT * FROM sources').get();
+  assert.equal(await enrichSubstackAudio(db, row(), { fetchImpl }), 1);
+  const ep = db.sqlite.prepare("SELECT duration_sec, thumbnail_url FROM items WHERE guid = 'ep'").get();
+  assert.equal(ep.duration_sec, 1797);
+  assert.match(ep.thumbnail_url, /art\.jpg$/);
+  assert.equal(row().podcast_feed_url, 'https://api.substack.com/feed/podcast/94899.rss');
+
+  // Nothing left to fill in: no further requests.
+  const before = calls.length;
+  assert.equal(await enrichSubstackAudio(db, row(), { fetchImpl }), 0);
+  assert.equal(calls.length, before);
 });

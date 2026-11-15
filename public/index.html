@@ -271,7 +271,7 @@ body.playing .toast { bottom: 96px; }
 
 <script>
 const PAGE = 100;
-const ITEM_VIEWS = ['new', 'queue', 'cleared'];
+const ITEM_VIEWS = ['new', 'queue', 'cleared', 'backlog'];
 const TOKEN_KEY = 'feed-tracker-token';
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -292,7 +292,7 @@ let items = [];
 let total = 0;
 let more = false;
 let sel = 0;
-let counts = { new: 0, queue: 0, cleared: 0 };
+let counts = { new: 0, queue: 0, cleared: 0, backlog: 0 };
 let sources = [];
 let loadSeq = 0;
 const undo = [];
@@ -436,7 +436,8 @@ async function setStatus(item, status, { record = true } = {}) {
   // Optimistic: drop the row and move the counts, then confirm with the server.
   const index = items.indexOf(item);
   if (index >= 0) { items.splice(index, 1); total = Math.max(0, total - 1); }
-  counts[bucket(prev)] = Math.max(0, counts[bucket(prev)] - 1);
+  const from = view === 'backlog' ? 'backlog' : bucket(prev);
+  counts[from] = Math.max(0, counts[from] - 1);
   counts[bucket(status)]++;
   sel = Math.min(sel, Math.max(0, items.length - 1));
   renderChrome(); renderItems();
@@ -464,10 +465,11 @@ async function undoLast() {
 
 // ---- rendering -------------------------------------------------------------
 function renderChrome() {
-  for (const v of ITEM_VIEWS) $('n-' + v).textContent = counts[v];
+  for (const v of ['new', 'queue', 'cleared']) $('n-' + v).textContent = counts[v];
   $('n-sources').textContent = sources.filter((s) => s.active).length;
   document.querySelectorAll('.tab').forEach((t) => {
-    if (t.dataset.view === view) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
+    const current = t.dataset.view === view || (view === 'backlog' && t.dataset.view === 'cleared');
+    if (current) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
   });
   const isItems = ITEM_VIEWS.includes(view);
   $('filters').hidden = !isItems;
@@ -554,12 +556,29 @@ function renderItems() {
   list.textContent = '';
   const filtered = typeFilter !== 'all' || sourceFilter || query.trim();
   $('showing').textContent = items.length === total ? total + ' items' : 'Showing ' + items.length + ' of ' + total;
+  if (view === 'backlog') {
+    const note = el('p', 'hint', 'Older items that were skipped automatically when each source was first added. ');
+    const back = el('a', null, 'Back to Cleared'); back.href = '#cleared'; back.style.color = 'var(--accent)';
+    note.append(back);
+    note.style.margin = '14px 0 0';
+    list.append(note);
+  }
+  const backlogNote = () => {
+    if (view !== 'cleared' || !counts.backlog) return;
+    const note = el('p', 'hint', counts.backlog + ' older items were skipped automatically when their sources were first added. ');
+    const show = el('a', null, 'Show them'); show.href = '#backlog'; show.style.color = 'var(--accent)';
+    note.append(show);
+    note.style.margin = '18px 0 0';
+    list.append(note);
+  };
   if (!items.length) {
     const msg = filtered ? 'Nothing matches these filters.'
       : view === 'new' ? (sources.length ? 'You are caught up. Nothing new.' : 'No subscriptions yet. Add one under Sources.')
       : view === 'queue' ? 'Nothing in watch next yet. Add items from New.'
+      : view === 'backlog' ? 'No skipped items.'
       : 'Nothing dismissed or finished yet.';
     list.append(el('p', 'empty', msg));
+    backlogNote();
     return;
   }
   let group = null, lastDay = null;
@@ -584,6 +603,7 @@ function renderItems() {
     wrap.append(button('Show more', '', () => loadItems({ append: true }).catch(report)));
     list.append(wrap);
   }
+  backlogNote();
 }
 
 function renderSources() {

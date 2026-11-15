@@ -61,6 +61,9 @@ See `migrations/0001_init.sql`.
 - [x] UI: new-items feed, queue, cleared, sources, keyboard shortcuts, undo, one
       page-wide audio player
 - [ ] Deploy (needs a Cloudflare account; see README)
+- [x] Skipped backlog kept apart from Cleared; thumbnails from post images and show art
+- [ ] Episode durations: filled from the show's podcast feed where it exists; several
+      shows (Sam Harris, Stay Tuned, The Long Game) return 404 there and still have none
 - [ ] Queue reordering, PWA manifest, YouTube embeds
 - [ ] Cross-posting dedupe via `shows`
 - [ ] Text-to-voice: article extraction, TTS on queue, R2 storage, Gmail as the text

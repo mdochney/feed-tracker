@@ -39,6 +39,12 @@ test('Substack RSS feed: podcast episode and text post', async () => {
   assert.equal(episode.thumbnail_url, 'https://substackcdn.com/image/ep12.jpg');
   assert.equal(episode.summary, 'We talk about feeds & queues.');
 
+  // No image of its own: the first image in the post body, sized down, else the show's image.
+  const noArt = parseFeed((await fixture('substack.xml')).replace(/<itunes:image[^>]*\/>/, '<content:encoded><![CDATA[<p><img src="https://substackcdn.com/image/fetch/$s_!ZQ!,w_1456,c_limit,f_auto/https%3A%2F%2Fx%2Fa.png" alt=""></p>]]></content:encoded>')).items[0];
+  assert.equal(noArt.thumbnail_url, 'https://substackcdn.com/image/fetch/$s_!ZQ!,w_320,c_limit,f_auto/https%3A%2F%2Fx%2Fa.png');
+  const showArt = parseFeed((await fixture('substack.xml')).replace(/<itunes:image[^>]*\/>/, '').replace('<link>https://example.substack.com</link>', '<link>https://example.substack.com</link><image><url>https://substackcdn.com/show.png</url></image>')).items[0];
+  assert.equal(showArt.thumbnail_url, 'https://substackcdn.com/show.png');
+
   // An image enclosure is a cover image, not media.
   assert.equal(essay.media_type, 'text');
   assert.equal(essay.media_url, null);

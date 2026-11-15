@@ -10,8 +10,9 @@ export const nowIso = () => new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 
 const UPSERT_ITEM = `
   INSERT INTO items (source_id, guid, title, url, published_at, media_type, media_url,
-                     duration_sec, thumbnail_url, summary, status, status_changed_at, first_seen_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     duration_sec, thumbnail_url, summary, status, status_changed_at, first_seen_at,
+                     auto_dismissed)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT (source_id, guid) DO UPDATE SET
     title = excluded.title,
     url = excluded.url,
@@ -41,7 +42,7 @@ export async function storePoll(db, source, result, at = nowIso()) {
     return db.prepare(UPSERT_ITEM).bind(
       source.id, it.guid, it.title, it.url, published, it.media_type, it.media_url,
       it.duration_sec, it.thumbnail_url, it.summary,
-      old ? 'dismissed' : 'new', old ? at : null, at);
+      old ? 'dismissed' : 'new', old ? at : null, at, old ? 1 : 0);
   });
   stmts.push(db.prepare(
     `UPDATE sources SET last_polled_at = ?, last_status = 'ok', etag = ?, last_modified = ?,
@@ -52,10 +53,82 @@ export async function storePoll(db, source, result, at = nowIso()) {
   return { inserted: after.n - before.n };
 }
 
+// ---- Substack episode details -------------------------------------------------
+// A publication's /feed has no durations or episode art. Its podcast feed
+// (api.substack.com/feed/podcast/<publication id>.rss) has both, keyed by post link.
+
+const UA = { 'user-agent': 'feed-tracker/0.1 (personal feed reader)' };
+const getText = async (url, fetchImpl) => {
+  const res = await fetchImpl(url, { headers: UA, redirect: 'follow', signal: AbortSignal.timeout(15000) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.text();
+};
+
+// Podcast feeds run to hundreds of episodes, so this scans the text instead of building a document.
+export function scanPodcastFeed(xml) {
+  const out = new Map();
+  for (const block of xml.split('<item>').slice(1)) {
+    const link = block.match(/<link>([^<]+)<\/link>/)?.[1]?.trim();
+    if (!link) continue;
+    const dur = block.match(/<itunes:duration>([^<]+)<\/itunes:duration>/)?.[1]?.trim();
+    const parts = dur ? dur.split(':').map(Number) : [];
+    const seconds = parts.length && !parts.some(Number.isNaN) ? Math.round(parts.reduce((a, p) => a * 60 + p, 0)) : null;
+    const image = block.match(/<itunes:image href="([^"]+)"/)?.[1]?.replace(/&amp;/g, '&') ?? null;
+    out.set(link, { duration_sec: seconds || null, thumbnail_url: image });
+  }
+  return out;
+}
+
+// Fill in durations for a Substack source's recent audio items. Returns how many were updated.
+export async function enrichSubstackAudio(db, source, { fetchImpl = fetch, privateFeeds = {} } = {}) {
+  if (source.platform !== 'substack' || source.podcast_feed_url === '' || privateFeeds[source.key]) return 0;
+  const since = new Date(Date.now() - 30 * 86400000).toISOString();
+  const { results: missing } = await db.prepare(
+    `SELECT id, url FROM items WHERE source_id = ? AND media_type <> 'text' AND duration_sec IS NULL
+       AND url IS NOT NULL AND published_at >= ? ORDER BY published_at DESC LIMIT 25`).bind(source.id, since).all();
+  if (!missing.length) return 0;
+
+  let feedUrl = source.podcast_feed_url;
+  if (feedUrl == null) {
+    const page = await getText(missing[0].url, fetchImpl);
+    const pubId = page.match(/"publication_id":(\d+)/)?.[1];
+    feedUrl = pubId ? `https://api.substack.com/feed/podcast/${pubId}.rss` : '';
+    await db.prepare('UPDATE sources SET podcast_feed_url = ? WHERE id = ?').bind(feedUrl, source.id).run();
+    if (!feedUrl) return 0;
+  }
+  let xml;
+  try { xml = await getText(feedUrl, fetchImpl); } catch (err) {
+    // Some shows have no feed at this address. Stop asking instead of retrying on every poll.
+    if (/HTTP 40[34]/.test(String(err?.message))) {
+      await db.prepare("UPDATE sources SET podcast_feed_url = '' WHERE id = ?").bind(source.id).run();
+      return 0;
+    }
+    throw err;
+  }
+  const details = scanPodcastFeed(xml);
+  const stmts = [];
+  for (const row of missing) {
+    const d = details.get(row.url);
+    if (d?.duration_sec) {
+      stmts.push(db.prepare('UPDATE items SET duration_sec = ?, thumbnail_url = COALESCE(?, thumbnail_url) WHERE id = ?')
+        .bind(d.duration_sec, d.thumbnail_url, row.id));
+    }
+  }
+  if (stmts.length) await db.batch(stmts);
+  return stmts.length;
+}
+
 export async function pollAndStore(db, source, opts = {}) {
   try {
     const result = await pollSource(source, opts);
     const { inserted } = await storePoll(db, source, result);
+    // Only when the feed changed, and within a per-run budget: each lookup costs extra requests.
+    if (result.status === 'ok' && (opts.enrichBudget?.left ?? 1) > 0) {
+      try {
+        if (opts.enrichBudget) opts.enrichBudget.left--;
+        await enrichSubstackAudio(db, source, opts);
+      } catch (err) { console.warn(`${source.key}: episode details unavailable (${err?.message ?? err})`); }
+    }
     return { key: source.key, ok: true, inserted };
   } catch (err) {
     const message = String(err?.message ?? err).slice(0, 200);
@@ -68,6 +141,7 @@ export async function pollAndStore(db, source, opts = {}) {
 // Poll the sources that have waited longest. `limit` keeps one invocation inside the
 // platform's subrequest budget (each source costs one fetch plus a few D1 calls).
 export async function pollBatch(db, { limit = 20, concurrency = 6, sourceId = null, ...opts } = {}) {
+  opts.enrichBudget ??= { left: 5 };
   const query = sourceId
     ? db.prepare('SELECT * FROM sources WHERE id = ?').bind(sourceId)
     : db.prepare('SELECT * FROM sources WHERE active = 1 ORDER BY last_polled_at IS NOT NULL, last_polled_at LIMIT ?').bind(limit);
@@ -85,7 +159,9 @@ export async function pollBatch(db, { limit = 20, concurrency = 6, sourceId = nu
 const VIEW_SQL = {
   new: { where: "i.status = 'new' AND s.active = 1", order: 'i.published_at DESC, i.id DESC' },
   queue: { where: "i.status = 'queued'", order: 'i.queue_position ASC, i.id ASC' },
-  cleared: { where: "i.status IN ('dismissed', 'done')", order: 'i.status_changed_at DESC, i.id DESC' },
+  cleared: { where: "i.status IN ('dismissed', 'done') AND i.auto_dismissed = 0", order: 'i.status_changed_at DESC, i.id DESC' },
+  // Older items skipped automatically when their source was first checked.
+  backlog: { where: "i.status = 'dismissed' AND i.auto_dismissed = 1", order: 'i.published_at DESC, i.id DESC' },
 };
 
 export async function listItems(db, { view = 'new', type = 'all', source = null, q = '', limit = 100, offset = 0 } = {}) {
@@ -116,7 +192,8 @@ export async function getState(db) {
   const counts = await db.prepare(`
     SELECT COALESCE(SUM(i.status = 'new' AND s.active = 1), 0) AS new,
            COALESCE(SUM(i.status = 'queued'), 0) AS queue,
-           COALESCE(SUM(i.status IN ('dismissed', 'done')), 0) AS cleared
+           COALESCE(SUM(i.status IN ('dismissed', 'done') AND i.auto_dismissed = 0), 0) AS cleared,
+           COALESCE(SUM(i.status = 'dismissed' AND i.auto_dismissed = 1), 0) AS backlog
     FROM items i JOIN sources s ON s.id = i.source_id`).first();
   const { results: sources } = await db.prepare(`
     SELECT s.id, s.key, s.platform, s.name, s.feed_url, s.site_url, s.active, s.last_polled_at, s.last_status,
@@ -131,7 +208,7 @@ export async function setItemStatus(db, id, status) {
   if (!STATUSES.has(status)) throw new RangeError('Unknown status: ' + status);
   const at = nowIso();
   const res = await db.prepare(
-    `UPDATE items SET status = ?, status_changed_at = ?,
+    `UPDATE items SET status = ?, status_changed_at = ?, auto_dismissed = 0,
             queue_position = CASE WHEN ? = 'queued' THEN ? ELSE NULL END
      WHERE id = ?`)
     .bind(status, status === 'new' ? null : at, status, Date.now(), Number(id)).run();

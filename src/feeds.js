@@ -56,6 +56,15 @@ function stripHtml(html, max = 500) {
   return plain.length > max ? plain.slice(0, max - 1).trimEnd() + '…' : plain;
 }
 
+// Substack's image CDN takes the width in the URL; ask for a thumbnail, not the full image.
+const thumb = (url) => (url && url.includes('substackcdn.com/image/fetch/') ? url.replace(/([$,/])w_\d+,/, '$1w_320,') : url ?? null);
+
+function firstImage(html) {
+  const s = text(html);
+  const src = s?.match(/<img\b[^>]*\bsrc=["']([^"']+)["']/i)?.[1];
+  return src ? src.replace(/&amp;/g, '&') : null;
+}
+
 function mediaTypeFromEnclosure(type, url) {
   const t = (type || '').toLowerCase();
   if (t.startsWith('video/')) return 'video';
@@ -82,11 +91,12 @@ function parseRssItem(item) {
     media_type: mediaType ?? 'text',
     media_url: mediaType ? mediaUrl : null,
     duration_sec: parseDuration(item['itunes:duration']),
-    thumbnail_url:
+    thumbnail_url: thumb(
       item['itunes:image']?.['@_href'] ??
       asArray(item['media:thumbnail'])[0]?.['@_url'] ??
       // Substack puts the post's cover image in an image/* enclosure on text posts.
-      (mediaUrl && !mediaType && /^image\//.test(enclosure['@_type'] || '') ? mediaUrl : null),
+      (mediaUrl && !mediaType && /^image\//.test(enclosure['@_type'] || '') ? mediaUrl : null) ??
+      firstImage(item['content:encoded'])),
     summary: stripHtml(item.description ?? item['itunes:summary']),
   };
 }
@@ -117,10 +127,13 @@ export function parseFeed(xml) {
   const doc = parser.parse(xml);
   if (doc.rss?.channel) {
     const ch = doc.rss.channel;
+    // Items without their own image fall back to the show's.
+    const channelImage = thumb(text(ch.image?.url) ?? ch['itunes:image']?.['@_href'] ?? null);
     return {
       title: text(ch.title),
       site_url: text(asArray(ch.link).find((l) => typeof l !== 'object' || l['#text'])),
-      items: asArray(ch.item).map(parseRssItem).filter(Boolean),
+      items: asArray(ch.item).map(parseRssItem).filter(Boolean)
+        .map((it) => (it.thumbnail_url ? it : { ...it, thumbnail_url: channelImage })),
     };
   }
   if (doc.feed) {
