@@ -431,15 +431,57 @@ function showToast(text, canUndo) {
 function hideToast() { $('toast').classList.remove('on'); }
 
 // One player for the whole page, so triaging the list never interrupts playback.
-function play(item) {
-  const media = safeUrl(item.media_url);
-  if (!media) return;
+const clock = (sec) => {
+  const s = Math.floor(sec), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s % 60).padStart(2, '0');
+};
+
+// ---- Playback position, shared across devices ------------------------------------
+// The position is saved to the server every 15 seconds of playing and on pause, seek, end
+// and leaving the page; starting an item asks the server where it last stopped.
+let playing = null; // { item, saved } for what is in the player
+function savePosition(force) {
+  if (!playing) return;
+  const audio = $('audio');
+  const ended = audio.ended || (audio.duration > 0 && audio.currentTime >= audio.duration - 15);
+  const pos = ended ? 0 : audio.currentTime;
+  if (!Number.isFinite(pos) || (!force && Math.abs(pos - playing.saved) < 15)) return;
+  if (pos === playing.saved) return;
+  playing.saved = pos;
+  playing.item.position_sec = pos || null;
+  // keepalive lets the last save finish while the page is closing.
+  fetch('/api/items/' + playing.item.id + '/position', {
+    method: 'POST', keepalive: true,
+    headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+    body: JSON.stringify({ position_sec: pos }),
+  }).catch(() => {});
+}
+
+async function startPlayback(item, src) {
   const audio = $('audio');
   $('player-title').textContent = item.source_name + ' · ' + item.title;
   $('player').hidden = false;
   document.body.classList.add('playing');
-  if (audio.src !== media) audio.src = media;
+  if (playing && playing.item.id === item.id && audio.src === src) { audio.play().catch(() => {}); return; }
+  savePosition(true); // the item being replaced
+  playing = null;
+  // Another device may have moved on since this list was loaded, so ask before starting.
+  let resume = item.position_sec || 0;
+  try { resume = (await api('/items/' + item.id + '/position')).position_sec || 0; } catch {}
+  item.position_sec = resume || null;
+  audio.src = src;
+  playing = { item, saved: resume };
+  if (resume > 5) {
+    const seek = () => { if (!(audio.duration > 0) || resume < audio.duration - 15) audio.currentTime = resume; };
+    if (audio.readyState >= 1) seek(); else audio.addEventListener('loadedmetadata', seek, { once: true });
+    showToast('Resuming at ' + clock(resume));
+  }
   audio.play().catch(() => {}); // the controls are there if autoplay is refused
+}
+
+function play(item) {
+  const media = safeUrl(item.media_url);
+  if (media) startPlayback(item, media);
 }
 
 // Read-aloud audio for a text post. The first press makes it, one piece per request, and
@@ -483,12 +525,7 @@ async function listen(item, btn) {
       }
       spoken.set(item.id, URL.createObjectURL(await res.blob()));
     }
-    const audio = $('audio');
-    $('player-title').textContent = item.source_name + ' · ' + item.title;
-    $('player').hidden = false;
-    document.body.classList.add('playing');
-    if (audio.src !== spoken.get(item.id)) audio.src = spoken.get(item.id);
-    audio.play().catch(() => {});
+    await startPlayback(item, spoken.get(item.id));
     btn.textContent = 'Listen';
   } catch (err) {
     btn.textContent = label;
@@ -499,10 +536,17 @@ async function listen(item, btn) {
 }
 $('player-close').addEventListener('click', () => {
   const audio = $('audio');
+  savePosition(true);
+  playing = null;
   audio.pause(); audio.removeAttribute('src'); audio.load();
   $('player').hidden = true;
   document.body.classList.remove('playing');
+  if (ITEM_VIEWS.includes(view)) renderItems(); // so the row shows where to resume
 });
+$('audio').addEventListener('timeupdate', () => savePosition(false));
+for (const ev of ['pause', 'seeked', 'ended']) $('audio').addEventListener(ev, () => savePosition(true));
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') savePosition(true); });
+window.addEventListener('pagehide', () => savePosition(true));
 
 // ---- loading ---------------------------------------------------------------
 let voiceUsage = null;
@@ -708,11 +752,11 @@ function rowFor(item, index) {
   const media = safeUrl(item.media_url);
   if (media) {
     const extra = el('div', 'extra');
-    extra.append(button('Play audio', 'small', () => play(item)));
+    extra.append(button(item.position_sec > 5 ? 'Resume at ' + clock(item.position_sec) : 'Play audio', 'small', () => play(item)));
     main.append(extra);
   } else if (item.media_type === 'text' && href) {
     const extra = el('div', 'extra');
-    const b = button(item.tts_status === 'ready' ? 'Listen' : 'Read aloud', 'small', () => listen(item, b));
+    const b = button(item.tts_status !== 'ready' ? 'Read aloud' : item.position_sec > 5 ? 'Resume at ' + clock(item.position_sec) : 'Listen', 'small', () => listen(item, b));
     b.title = item.tts_status === 'ready' ? 'Play the audio already made for this post' : 'Turn this post into audio (takes up to a minute)';
     extra.append(b);
     main.append(extra);

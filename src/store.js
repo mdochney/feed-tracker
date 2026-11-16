@@ -361,7 +361,7 @@ export async function listItems(db, { view = 'new', type = 'all', source = null,
   const sql = `
     SELECT i.id, i.source_id, s.name AS source_name, s.platform, i.title, i.url, i.published_at,
            i.media_type, i.media_url, i.duration_sec, i.thumbnail_url, i.summary, i.status,
-           i.status_changed_at, i.tts_status
+           i.status_changed_at, i.tts_status, i.position_sec
     FROM items i ${v.hint ?? ''} JOIN sources s ON s.id = i.source_id
     WHERE ${where.join(' AND ')}
     ORDER BY ${v.order}
@@ -407,6 +407,19 @@ export async function setItemStatus(db, id, status) {
      WHERE id = ?`)
     .bind(status, status === 'new' ? null : at, status, Date.now(), Number(id)).run();
   return (res.meta?.changes ?? 0) > 0;
+}
+
+// Playback position, shared across devices. Zero clears it.
+export async function setItemPosition(db, id, seconds, at = nowIso()) {
+  const sec = seconds;
+  if (typeof sec !== 'number' || !Number.isFinite(sec) || sec < 0 || sec > 1_000_000) throw new RangeError('position_sec must be a number of seconds');
+  const res = await db.prepare('UPDATE items SET position_sec = ?, position_at = ? WHERE id = ?')
+    .bind(sec > 0 ? Math.round(sec * 10) / 10 : null, at, Number(id)).run();
+  return (res.meta?.changes ?? 0) > 0;
+}
+
+export async function getItemPosition(db, id) {
+  return db.prepare('SELECT position_sec, position_at FROM items WHERE id = ?').bind(Number(id)).first();
 }
 
 export async function addSource(db, { key, platform, name, feed_url, site_url = null }) {

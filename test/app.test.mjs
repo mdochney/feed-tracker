@@ -598,3 +598,21 @@ test('a full polling run still leaves room to look up waiting post lengths', asy
   const { results } = await db.prepare("SELECT duration_sec FROM items").all();
   assert.deepEqual(results.map((r) => r.duration_sec), [600, 600]);
 });
+
+test('playback position is saved, returned and cleared', async () => {
+  const db = await createDb();
+  await db.prepare("INSERT INTO sources (key, platform, name, feed_url) VALUES ('podcast:x', 'podcast', 'X', 'https://x.example/feed')").run();
+  await db.prepare("INSERT INTO items (source_id, guid, title, url, media_type, media_url) VALUES (1, 'g', 'Ep', 'https://x.example/e', 'audio', 'https://x.example/e.mp3')").run();
+  const env = { DB: db, APP_TOKEN: 'secret' };
+  const call = (method, p, b) => worker.fetch(new Request('https://app.example' + p, {
+    method, headers: { authorization: 'Bearer secret', 'content-type': 'application/json' }, body: b ? JSON.stringify(b) : undefined }), env, {});
+  assert.equal((await (await call('GET', '/api/items/1/position')).json()).position_sec, 0);
+  assert.equal((await call('POST', '/api/items/1/position', { position_sec: 754.26 })).status, 200);
+  assert.equal((await (await call('GET', '/api/items/1/position')).json()).position_sec, 754.3);
+  assert.equal((await (await call('GET', '/api/items?view=new')).json()).items[0].position_sec, 754.3);
+  for (const bad of [-1, 'abc', null, 1e9]) assert.equal((await call('POST', '/api/items/1/position', { position_sec: bad })).status, 400);
+  assert.equal((await call('POST', '/api/items/1/position', { position_sec: 0 })).status, 200);
+  assert.equal((await (await call('GET', '/api/items?view=new')).json()).items[0].position_sec, null);
+  assert.equal((await call('POST', '/api/items/99/position', { position_sec: 5 })).status, 404);
+  assert.equal((await worker.fetch(new Request('https://app.example/api/items/1/position'), env, {})).status, 401);
+});

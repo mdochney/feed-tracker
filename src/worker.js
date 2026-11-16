@@ -2,7 +2,7 @@
 // Static files in public/ are served by the platform before this code runs.
 
 import {
-  pollBatch, listItems, getState, setItemStatus, addSource, updateSource, deleteSource, pollAndStore,
+  pollBatch, listItems, getState, setItemStatus, setItemPosition, getItemPosition, addSource, updateSource, deleteSource, pollAndStore,
   enrichSubstackAudio,
 } from './store.js';
 import { resolveSource } from './resolve.js';
@@ -84,7 +84,21 @@ async function api(request, env, ctx) {
     }));
   }
 
-  let m = path.match(/^\/api\/items\/(\d+)$/);
+  let m = path.match(/^\/api\/items\/(\d+)\/position$/);
+  if (m && method === 'GET') {
+    const pos = await getItemPosition(db, m[1]);
+    return pos ? json({ position_sec: pos.position_sec ?? 0, position_at: pos.position_at }) : fail(404, 'No such item');
+  }
+  if (m && method === 'POST') {
+    try {
+      return (await setItemPosition(db, m[1], (await body(request)).position_sec)) ? json({ ok: true }) : fail(404, 'No such item');
+    } catch (err) {
+      if (err instanceof RangeError) return fail(400, err.message);
+      throw err;
+    }
+  }
+
+  m = path.match(/^\/api\/items\/(\d+)$/);
   if (m && method === 'POST') {
     const { status } = await body(request);
     try {
