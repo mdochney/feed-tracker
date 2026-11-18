@@ -23,17 +23,25 @@ const decode = (s) => s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e) => {
 
 // Article HTML to the words a reader would hear: no captions, buttons, footnote marks or
 // subscribe prompts.
+// Attribute values can hold a literal '>' (Substack embeds put whole JSON blobs, bios and all,
+// in data-attrs), so a tag ends at the first '>' that is outside quotes.
+const ATTRS = `(?:[^>"']|"[^"]*"|'[^']*')*`;
+const TAG = new RegExp(`<${ATTRS}>`, 'g');
+
 export function articleText(html) {
   let s = String(html ?? '');
   s = s.replace(/<!--[\s\S]*?-->/g, ' ');
+  // Drop the embed payloads outright; nothing in them is meant to be read.
+  s = s.replace(/\sdata-attrs\s*=\s*("[^"]*"|'[^']*')/gi, '');
   s = s.replace(/<(figure|script|style|button|form|svg|iframe|noscript|audio|video|sup)\b[\s\S]*?<\/\1>/gi, ' ');
-  s = s.replace(/<a\b[^>]*class="[^"]*(footnote-anchor|button)[^"]*"[^>]*>[\s\S]*?<\/a>/gi, ' ');
-  s = s.replace(/<(br|hr)\b[^>]*>/gi, '\n');
+  s = s.replace(new RegExp(`<a\\b${ATTRS}class="[^"]*(footnote-anchor|button)[^"]*"${ATTRS}>[\\s\\S]*?<\\/a>`, 'gi'), ' ');
+  s = s.replace(new RegExp(`<(br|hr)\\b${ATTRS}>`, 'gi'), '\n');
   s = s.replace(/<\/(p|div|h[1-6]|li|blockquote|tr|section|article|ul|ol|pre)>/gi, '\n');
-  s = decode(s.replace(/<[^>]+>/g, ''));
+  s = decode(s.replace(TAG, ''));
   const lines = s.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter((l) =>
-    l && !/^(share|subscribe( now)?|leave a comment|read more|upgrade to paid|give a gift subscription|refer a friend)$/i.test(l) &&
-    !/^thanks for reading\b.*\bsubscribe\b/i.test(l) && !/^this (post|substack) is (public|reader-supported)\b/i.test(l));
+    l && !/^(share|subscribe( now)?|leave a comment|read more|listen now|watch now|upgrade to paid|give a gift subscription|refer a friend)$/i.test(l) &&
+    !/^thanks for reading\b.*\bsubscribe\b/i.test(l) && !/^this (post|substack) is (public|reader-supported)\b/i.test(l) &&
+    !/·\s*\d+\s+(likes?|comments?|restacks?)\b/i.test(l)); // embedded-post card meta line
   return lines.join('\n');
 }
 

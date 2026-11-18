@@ -443,6 +443,12 @@ test('a text post is read aloud once, in pieces, and counted against the monthly
   const html = '<p>First &amp; <em>foremost</em>.<a class="footnote-anchor" href="#f1">1</a></p><figure><figcaption>A caption</figcaption></figure>' +
     '<p class="button-wrapper"><a class="button primary" href="/subscribe">Subscribe now</a></p><h2>Next</h2><ul><li>One</li><li>Two&#8217;s</li></ul>';
   assert.equal(articleText(html), 'First & foremost.\nNext\nOne\nTwo’s');
+  // Substack embeds keep JSON in data-attrs, and a '>' inside it (an author bio with
+  // <http://...>) must not end the tag and spill the JSON into the spoken text.
+  const embed = '<p>Before.</p><div class="embedded-post-wrap" data-attrs="{&quot;bio&quot;:&quot;Blog: <http://x.substack.com>. More&quot;,&quot;url&quot;:&quot;https://x.substack.com/p/y&quot;}">' +
+    '<div class="embedded-post"><div class="embedded-post-title">Live with X</div><div class="embedded-post-meta">14 hours ago · 22 likes · 1 comment · X</div>' +
+    '<div class="embedded-post-cta">Listen now</div></div></div><div class="twitter-embed" data-attrs="{&quot;full_text&quot;:&quot;a > b&quot;}"></div><p>After.</p>';
+  assert.equal(articleText(embed), 'Before.\nLive with X\nAfter.');
   const long = Array.from({ length: 40 }, (_, i) => `Sentence number ${i} is here.`).join(' ');
   const pieces = splitText(long + '\n' + 'é'.repeat(300), 400);
   assert.ok(pieces.length > 3 && pieces.every((p) => new TextEncoder().encode(p).length <= 400));
